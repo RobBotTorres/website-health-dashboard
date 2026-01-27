@@ -6,6 +6,41 @@ compatibility_date = "2024-01-01"
 [triggers]
 crons = ["0 11 * * *"]
 
+# ============================================
+# STAGING ENVIRONMENT
+# ============================================
+[env.staging]
+name = "wine-health-dashboard-staging"
+# No cron triggers in staging
+
+# Staging uses same D1 database
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "wine-seo-audits"
+database_id = "c48022d2-100a-4d3d-9315-9da87c6c06a6"
+
+[[env.staging.kv_namespaces]]
+binding = "SEO_AUDITS"
+id = "9678ee508f874492887d0b25ba89bbc5"
+
+[env.staging.vars]
+ADAIR_CF_ZONE_IDS = "3c6f5ec53c64d53b13a3edb15bc86d79,91f16d65b970bfe14bdd005466c305e6"
+BRCOHN_CF_ZONE_IDS = "ed7f4a7b5fa022c2e803dd40d833d541"
+CLOSPEGASE_CF_ZONE_IDS = "530921bb036e394919e87b3d4956f818"
+GIRARD_CF_ZONE_IDS = "3568f251652a6ab6714876711cb2dd9b"
+KUNDE_CF_ZONE_IDS = "9422c182e70910ae340dfd100357e762"
+VIANSA_CF_ZONE_IDS = "152084b83d9eccf45eee4eb6606bb9e0"
+ADAIR_GSC_PROPERTIES = "sc-domain:adairfamilywines.com,sc-domain:adairwinery.com"
+BRCOHN_GSC_PROPERTIES = "sc-domain:brcohn.com"
+CLOSPEGASE_GSC_PROPERTIES = "sc-domain:clospegase.com"
+GIRARD_GSC_PROPERTIES = "sc-domain:girardwinery.com"
+KUNDE_GSC_PROPERTIES = "sc-domain:kunde.com"
+VIANSA_GSC_PROPERTIES = "sc-domain:viansa.com"
+
+# ============================================
+# PRODUCTION (default)
+# ============================================
+
 # KV Namespace for storing SEO audit results
 [[kv_namespaces]]
 binding = "SEO_AUDITS"
@@ -18,7 +53,7 @@ database_name = "wine-seo-audits"
 database_id = "c48022d2-100a-4d3d-9315-9da87c6c06a6"
 
 [vars]
-# Property Zone IDs
+# Property Zone IDs 
 ADAIR_CF_ZONE_IDS = "3c6f5ec53c64d53b13a3edb15bc86d79,91f16d65b970bfe14bdd005466c305e6"
 BRCOHN_CF_ZONE_IDS = "ed7f4a7b5fa022c2e803dd40d833d541"
 CLOSPEGASE_CF_ZONE_IDS = "530921bb036e394919e87b3d4956f818"
