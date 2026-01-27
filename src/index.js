@@ -87,6 +87,16 @@ export default {
       return handle404Errors(propertyId, env);
     }
     
+    // Performance history for charts
+    if (url.pathname === '/api/performance-history') {
+      return handlePerformanceHistory(env);
+    }
+    
+    // Store today's performance snapshot (call daily)
+    if (url.pathname === '/api/store-performance') {
+      return storePerformanceSnapshot(env);
+    }
+    
     // Competitor tracking
     if (url.pathname === '/api/competitors') {
       const domain = url.searchParams.get('domain');
@@ -252,7 +262,69 @@ async function runScheduledAudit(env) {
     }
   }
   
-  console.log('Scheduled audit complete');
+  console.log('SEO audit complete, now collecting performance data...');
+  
+  // Collect daily performance snapshot
+  try {
+    await collectPerformanceSnapshot(env);
+    console.log('Performance snapshot collected');
+  } catch (error) {
+    console.error('Error collecting performance:', error);
+  }
+  
+  console.log('Scheduled tasks complete');
+}
+
+// Collect performance data for all domains
+async function collectPerformanceSnapshot(env) {
+  if (!env.DB || !env.PAGESPEED_API_KEY) {
+    console.log('Performance collection skipped - missing DB or API key');
+    return;
+  }
+  
+  const domains = [
+    'viansa.com',
+    'kunde.com', 
+    'brcohn.com',
+    'clospegase.com',
+    'girardwinery.com',
+    'adairfamilywines.com'
+  ];
+  
+  const today = new Date().toISOString().split('T')[0];
+  
+  for (const domain of domains) {
+    try {
+      const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+      
+      if (cwv && !cwv.error) {
+        await env.DB.prepare(`
+          INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(domain, date) DO UPDATE SET
+            lcp_ms = excluded.lcp_ms,
+            fcp_ms = excluded.fcp_ms,
+            cls = excluded.cls,
+            inp_ms = excluded.inp_ms,
+            ttfb_ms = excluded.ttfb_ms,
+            recorded_at = excluded.recorded_at
+        `).bind(
+          domain, 
+          today, 
+          cwv.LCP || null, 
+          cwv.FCP || null, 
+          cwv.CLS || null, 
+          cwv.INP || null, 
+          cwv.TTFB || null,
+          new Date().toISOString()
+        ).run();
+        
+        console.log(`Stored performance for ${domain}: LCP=${cwv.LCP}ms`);
+      }
+    } catch (e) {
+      console.error(`Performance error for ${domain}:`, e.message);
+    }
+  }
 }
 
 // Full sitemap audit - crawls ALL pages and stores in D1
@@ -1736,6 +1808,119 @@ async function handleKeywords(domain, env) {
     console.error('Keywords error:', e);
     return new Response(JSON.stringify({ hasData: false, error: e.message }), { headers });
   }
+}
+
+// Performance History for Charts
+async function handlePerformanceHistory(env) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'public, max-age=300'
+  };
+  
+  if (!env.DB) {
+    return new Response(JSON.stringify({ hasData: false }), { headers });
+  }
+  
+  try {
+    // Get last 30 days of performance data for all domains
+    const history = await env.DB.prepare(`
+      SELECT domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms
+      FROM performance_history
+      WHERE date >= date('now', '-30 days')
+      ORDER BY date ASC
+    `).all();
+    
+    // Group by domain
+    const byDomain = {};
+    for (const row of history.results || []) {
+      if (!byDomain[row.domain]) {
+        byDomain[row.domain] = [];
+      }
+      byDomain[row.domain].push({
+        date: row.date,
+        lcp: row.lcp_ms,
+        fcp: row.fcp_ms,
+        cls: row.cls,
+        inp: row.inp_ms,
+        ttfb: row.ttfb_ms
+      });
+    }
+    
+    return new Response(JSON.stringify({
+      hasData: Object.keys(byDomain).length > 0,
+      history: byDomain
+    }), { headers });
+    
+  } catch (e) {
+    console.error('Performance history error:', e);
+    return new Response(JSON.stringify({ hasData: false, error: e.message }), { headers });
+  }
+}
+
+// Store Performance Snapshot (call daily via cron or manually)
+async function storePerformanceSnapshot(env) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*'
+  };
+  
+  if (!env.DB || !env.PAGESPEED_API_KEY) {
+    return new Response(JSON.stringify({ success: false, error: 'Not configured' }), { headers });
+  }
+  
+  const domains = [
+    'viansa.com',
+    'kunde.com', 
+    'brcohn.com',
+    'clospegase.com',
+    'girardwinery.com',
+    'adairfamilywines.com'
+  ];
+  
+  const today = new Date().toISOString().split('T')[0];
+  const results = [];
+  
+  for (const domain of domains) {
+    try {
+      const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+      
+      if (cwv && !cwv.error) {
+        await env.DB.prepare(`
+          INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(domain, date) DO UPDATE SET
+            lcp_ms = excluded.lcp_ms,
+            fcp_ms = excluded.fcp_ms,
+            cls = excluded.cls,
+            inp_ms = excluded.inp_ms,
+            ttfb_ms = excluded.ttfb_ms,
+            recorded_at = excluded.recorded_at
+        `).bind(
+          domain, 
+          today, 
+          cwv.LCP || null, 
+          cwv.FCP || null, 
+          cwv.CLS || null, 
+          cwv.INP || null, 
+          cwv.TTFB || null,
+          new Date().toISOString()
+        ).run();
+        
+        results.push({ domain, success: true, lcp: cwv.LCP });
+      } else {
+        results.push({ domain, success: false, error: cwv?.error || 'No data' });
+      }
+    } catch (e) {
+      results.push({ domain, success: false, error: e.message });
+    }
+  }
+  
+  return new Response(JSON.stringify({ 
+    success: true, 
+    date: today,
+    results 
+  }), { headers });
 }
 
 // 404 Errors from Cloudflare Analytics
@@ -4244,6 +4429,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wine Health Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     :root{--bg:#0f0f1a;--bg2:#1a1a2e;--card:#242438;--text:#fff;--text2:#a0a0b0;--text3:#6a6a7a;--blue:#6366f1;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--purple:#8b5cf6;--wine:#722F37;--border:#2d2d44}
@@ -4461,6 +4647,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="summary-card"><div class="icon red">🆕</div><div class="value" id="total-new">—</div><div class="label">New This Week</div></div>
           <div class="summary-card"><div class="icon red">⚠️</div><div class="value" id="total-high">—</div><div class="label">High Priority</div></div>
         </div>
+        <div class="section"><div class="section-header"><h3>Performance Trends</h3><span style="font-size:12px;color:var(--text3)">LCP (Largest Contentful Paint) over time - lower is better</span></div><div style="background:var(--card);border-radius:12px;padding:20px;height:300px;position:relative"><canvas id="perf-trends-chart"></canvas><div id="perf-trends-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text3)">Loading performance data...</div></div></div>
         <div class="section"><div class="section-header"><h3>Properties</h3></div><div class="properties-grid" id="properties-grid"></div></div>
       </div>
       <div class="view" id="view-property">
@@ -4577,7 +4764,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     async function showProperty(id){showView('property');document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));document.querySelector('.nav-item[data-property="'+id+'"]')?.classList.add('active');document.querySelectorAll('#view-property .tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('#view-property .tab-content').forEach(c=>c.classList.remove('active'));document.querySelector('#view-property .tab[data-tab="overview"]').classList.add('active');document.getElementById('tab-overview').classList.add('active');currentPropertyId=id;currentDomain=PROPERTIES[id]?.domain;await fetchProperty(id)}
     async function refresh(){const btn=document.getElementById('refreshBtn'),loading=document.getElementById('loading');btn.disabled=true;btn.classList.add('loading');loading.classList.add('active');try{renderPortfolio();document.getElementById('lastUpdated').textContent='Updated '+new Date().toLocaleTimeString()}catch(e){console.error(e)}finally{btn.disabled=false;btn.classList.remove('loading');loading.classList.remove('active')}}
     async function fetchProperty(id){document.getElementById('loading').classList.add('active');try{const res=await fetch('/api/data?property='+id);propertyData[id]=await res.json();renderProperty(propertyData[id])}catch(e){console.error(e)}finally{document.getElementById('loading').classList.remove('active')}}
-    function renderPortfolio(){document.getElementById('total-open').textContent='...';document.getElementById('total-fixed').textContent='...';document.getElementById('total-new').textContent='...';document.getElementById('total-high').textContent='...';const grid=document.getElementById('properties-grid');grid.innerHTML=Object.entries(PROPERTIES).map(function(e){var id=e[0],p=e[1];return '<div class="property-card" data-id="'+id+'"><div class="color-top" style="background:'+(p.color||'#666')+'"></div><div class="property-card-header"><div><h3>'+p.name+'</h3></div><span class="health-badge" id="badge-'+id+'">Loading</span></div><div class="property-metrics"><div class="mini-metric"><div class="value" id="stat-sessions-'+id+'">—</div><div class="label">Sessions</div></div><div class="mini-metric"><div class="value" id="stat-lcp-'+id+'">—</div><div class="label">LCP</div></div><div class="mini-metric"><div class="value" id="stat-cache-'+id+'">—</div><div class="label">Cache</div></div><div class="mini-metric"><div class="value" id="stat-issues-'+id+'">—</div><div class="label">Issues</div></div></div></div>'}).join('');grid.querySelectorAll('.property-card').forEach(card=>{card.addEventListener('click',()=>showProperty(card.dataset.id))});loadAllPropertyStats()}
+    function renderPortfolio(){document.getElementById('total-open').textContent='...';document.getElementById('total-fixed').textContent='...';document.getElementById('total-new').textContent='...';document.getElementById('total-high').textContent='...';const grid=document.getElementById('properties-grid');grid.innerHTML=Object.entries(PROPERTIES).map(function(e){var id=e[0],p=e[1];return '<div class="property-card" data-id="'+id+'"><div class="color-top" style="background:'+(p.color||'#666')+'"></div><div class="property-card-header"><div><h3>'+p.name+'</h3></div><span class="health-badge" id="badge-'+id+'">Loading</span></div><div class="property-metrics"><div class="mini-metric"><div class="value" id="stat-sessions-'+id+'">—</div><div class="label">Sessions</div></div><div class="mini-metric"><div class="value" id="stat-lcp-'+id+'">—</div><div class="label">LCP</div></div><div class="mini-metric"><div class="value" id="stat-cache-'+id+'">—</div><div class="label">Cache</div></div><div class="mini-metric"><div class="value" id="stat-issues-'+id+'">—</div><div class="label">Issues</div></div></div></div>'}).join('');grid.querySelectorAll('.property-card').forEach(card=>{card.addEventListener('click',()=>showProperty(card.dataset.id))});loadAllPropertyStats();loadPerformanceTrendsChart()}
+    var perfTrendsChart=null;
+    async function loadPerformanceTrendsChart(){try{var res=await fetch('/api/performance-history');var data=await res.json();document.getElementById('perf-trends-loading').style.display='none';if(!data.hasData||!data.history||Object.keys(data.history).length===0){document.getElementById('perf-trends-loading').style.display='block';document.getElementById('perf-trends-loading').textContent='No historical data yet. Run /api/store-performance to start collecting.';return}var datasets=[];var allDates=new Set();var colors={'viansa.com':'#722F37','kunde.com':'#2E7D32','brcohn.com':'#1565C0','clospegase.com':'#6A1B9A','girardwinery.com':'#EF6C00','adairfamilywines.com':'#00838F'};Object.entries(data.history).forEach(function(e){var domain=e[0],points=e[1];points.forEach(function(p){allDates.add(p.date)})});var sortedDates=Array.from(allDates).sort();Object.entries(data.history).forEach(function(e){var domain=e[0],points=e[1];var dataMap={};points.forEach(function(p){dataMap[p.date]=p.lcp?p.lcp/1000:null});var chartData=sortedDates.map(function(d){return dataMap[d]||null});var shortName=domain.replace('.com','').replace('www.','');datasets.push({label:shortName,data:chartData,borderColor:colors[domain]||'#666',backgroundColor:(colors[domain]||'#666')+'20',tension:0.3,fill:false,pointRadius:3,pointHoverRadius:5})});var ctx=document.getElementById('perf-trends-chart').getContext('2d');if(perfTrendsChart)perfTrendsChart.destroy();perfTrendsChart=new Chart(ctx,{type:'line',data:{labels:sortedDates.map(function(d){return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'})}),datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{color:'#888',usePointStyle:true,padding:15}},tooltip:{backgroundColor:'#1a1a2e',titleColor:'#fff',bodyColor:'#ccc',callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y?ctx.parsed.y.toFixed(2)+'s':'N/A')}}}},scales:{x:{grid:{color:'#333'},ticks:{color:'#888'}},y:{grid:{color:'#333'},ticks:{color:'#888',callback:function(v){return v+'s'}},title:{display:true,text:'LCP (seconds)',color:'#888'}}}}})}catch(e){console.error('Chart error:',e);document.getElementById('perf-trends-loading').textContent='Failed to load chart'}}
     async function loadAllPropertyStats(){var totals={open:0,fixed:0,newIssues:0,high:0};for(var id in PROPERTIES){var p=PROPERTIES[id];try{var seoRes=fetch('/api/seo-stats?domain='+p.domain);var a11yRes=fetch('/api/accessibility?domain='+p.domain);var perfRes=fetch('/api/performance?property='+id+'&domain='+p.domain);var seo=await (await seoRes).json();var a11y=await (await a11yRes).json();var perf=await (await perfRes).json();var a11yOpen=0,a11yNew=0,a11yHigh=0;if(a11y&&a11y.hasData){(a11y.issues||[]).forEach(function(i){a11yOpen+=i.pageCount||1;a11yNew+=i.newThisWeek||0;if(i.severity==='high')a11yHigh+=i.pageCount||1})}var seoHigh=0;if(seo&&seo.hasData!==false){(seo.topIssues||[]).filter(function(i){return i.severity==='high'}).forEach(function(i){seoHigh+=i.count})}var propOpen=(seo?.openIssues||0)+a11yOpen;var propFixed=seo?.fixedThisWeek||0;var propNew=(seo?.newThisWeek||0)+a11yNew;var propHigh=seoHigh+a11yHigh;totals.open+=propOpen;totals.fixed+=propFixed;totals.newIssues+=propNew;totals.high+=propHigh;var cf=perf?.cloudflare||{};var ga=perf?.ga4||{};var cwv=perf?.cwv||{};var sessions=ga.sessions;var lcp=cwv.LCP?(cwv.LCP/1000).toFixed(1)+'s':null;var lcpRating=cwv.lcpRating;var cache=parseFloat(cf.cacheRatio)||0;document.getElementById('stat-sessions-'+id).innerHTML=sessions?fmt(sessions):'—';document.getElementById('stat-lcp-'+id).innerHTML=lcp?'<span class="'+(lcpRating==='FAST'?'good':lcpRating==='AVERAGE'?'warning':'bad')+'">'+lcp+'</span>':'—';document.getElementById('stat-cache-'+id).innerHTML=cache?'<span class="'+(cache>=80?'good':cache>=60?'warning':'bad')+'">'+cache.toFixed(0)+'%</span>':'—';document.getElementById('stat-issues-'+id).innerHTML='<span class="'+(propOpen>20?'bad':propOpen>0?'warning':'good')+'">'+propOpen+'</span>';var status=propHigh>5?'critical':propHigh>0?'warning':'healthy';var badge=document.getElementById('badge-'+id);if(badge){badge.className='health-badge '+status;badge.textContent=propHigh>5?'Critical':propHigh>0?'Warning':'Healthy'}var dot=document.getElementById('nav-status-'+id);if(dot)dot.className='status '+status;document.getElementById('total-open').innerHTML='<span class="'+(totals.open>0?'warning':'good')+'">'+totals.open+'</span>';document.getElementById('total-fixed').innerHTML='<span class="'+(totals.fixed>0?'good':'')+'">'+totals.fixed+'</span>';document.getElementById('total-new').innerHTML='<span class="'+(totals.newIssues>0?'bad':'good')+'">'+totals.newIssues+'</span>';document.getElementById('total-high').innerHTML='<span class="'+(totals.high>0?'bad':'good')+'">'+totals.high+'</span>'}catch(e){console.error('Error loading stats for '+id,e);document.getElementById('stat-sessions-'+id).textContent='—';document.getElementById('stat-lcp-'+id).textContent='—';document.getElementById('stat-cache-'+id).textContent='—';document.getElementById('stat-issues-'+id).textContent='—';var badge=document.getElementById('badge-'+id);if(badge){badge.className='health-badge';badge.textContent='Error'}}}}
     function renderProperty(d){if(!d||d.type!=='detail')return;const p=d.property||{};const seo=d.seoStats;document.getElementById('prop-name').textContent=p.name;document.getElementById('prop-domains').textContent=p.domain||p.shortName||'';currentDomain=p.domain;document.getElementById('overview-stats').innerHTML='<div class="metric-card" style="grid-column:1/-1"><div class="value" style="font-size:14px;color:var(--text3)">Loading...</div></div>';document.getElementById('overview-quick').innerHTML='<div class="metric-card" style="grid-column:1/-1"><div class="value" style="font-size:14px;color:var(--text3)">Loading stats...</div></div>';document.getElementById('overview-issues').innerHTML='';loadOverviewData();document.getElementById('perf-traffic').innerHTML='<p style="color:var(--text2)">Click tab to load...</p>';document.getElementById('perf-ga4').innerHTML='';document.getElementById('perf-cwv').innerHTML='';document.getElementById('perf-codes').innerHTML='';document.getElementById('perf-recommendations').innerHTML='';document.getElementById('seo-issues').innerHTML='<p style="color:var(--text2)">Click tab to load...</p>';document.getElementById('seo-broken').innerHTML='';document.getElementById('seo-keywords').innerHTML='';document.getElementById('seo-opportunities').innerHTML='';document.getElementById('a11y-issues').innerHTML='<p style="color:var(--text2)">Click tab to load...</p>';document.getElementById('a11y-recommendations').innerHTML=''}
     function formatIssueMsg(type,count){var msgs={missing_title:count+' pages missing title',short_title:count+' pages with short titles',missing_description:count+' pages missing meta description',short_description:count+' pages with short descriptions',missing_h1:count+' pages missing H1 tag',multiple_h1:count+' pages with multiple H1s',missing_schema:count+' pages without schema',schema_error:count+' pages with schema errors',missing_canonical:count+' pages missing canonical URL',canonical_mismatch:count+' pages with mismatched canonical',invalid_canonical:count+' pages with invalid canonical URL',missing_social_tags:count+' pages missing social meta tags',partial_social_tags:count+' pages with incomplete social tags',images_no_lazy:count+' pages with images missing lazy loading',images_no_dimensions:count+' pages with images missing dimensions',images_not_webp:count+' pages with non-WebP images',duplicate_title:count+' pages with duplicate titles',duplicate_description:count+' pages with duplicate descriptions',error_404:count+' 404 errors detected'};return msgs[type]||count+' '+type+' issues'}
