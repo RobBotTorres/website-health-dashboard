@@ -253,16 +253,6 @@ async function runScheduledAudit(env) {
     }
   }
   
-  console.log('SEO audit complete, now collecting performance data...');
-  
-  // Collect daily performance snapshot
-  try {
-    await collectPerformanceSnapshot(env);
-    console.log('Performance snapshot collected');
-  } catch (error) {
-    console.error('Error collecting performance:', error);
-  }
-  
   console.log('Scheduled tasks complete');
 }
 
@@ -469,25 +459,55 @@ async function runFullSitemapAudit(domain, env) {
   
   // Store in D1 database
   if (env.DB) {
+    // 1. Store audit results
     try {
       console.log(`Storing audit in D1 for ${domain}...`);
       await storeAuditInD1(env.DB, domain, today, audit);
       console.log(`SUCCESS: Stored audit for ${domain} in D1 (${audit.audited} pages)`);
-      
-      // Also fetch and store Search Console data
+    } catch (e) {
+      console.error(`FAILED to store audit in D1: ${e.message}`);
+      console.error(e.stack);
+      audit.d1Error = e.message;
+    }
+    
+    // 2. Fetch and store Search Console data (independent)
+    try {
       const propertyId = getPropertyIdForDomain(domain);
       if (propertyId) {
         console.log(`Fetching Search Console data for ${domain}...`);
         await fetchAndStoreSearchConsole(env, domain, propertyId, today);
-        
-        // Fetch and store performance data (Cloudflare + CWV)
-        console.log(`Fetching performance data for ${domain}...`);
-        await fetchAndStorePerformance(env, domain, propertyId, today);
       }
     } catch (e) {
-      console.error(`FAILED to store in D1: ${e.message}`);
-      console.error(e.stack);
-      audit.d1Error = e.message;
+      console.error(`Failed Search Console for ${domain}: ${e.message}`);
+    }
+    
+    // 3. Fetch and store performance history data (independent)
+    try {
+      if (env.PAGESPEED_API_KEY) {
+        console.log(`Fetching performance data for ${domain}...`);
+        const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+        if (cwv && !cwv.error) {
+          await env.DB.prepare(`
+            INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(domain, date) DO UPDATE SET
+              lcp_ms = excluded.lcp_ms,
+              fcp_ms = excluded.fcp_ms,
+              cls = excluded.cls,
+              inp_ms = excluded.inp_ms,
+              ttfb_ms = excluded.ttfb_ms,
+              recorded_at = excluded.recorded_at
+          `).bind(
+            domain, today,
+            cwv.LCP || null, cwv.FCP || null, cwv.CLS || null,
+            cwv.INP || null, cwv.TTFB || null,
+            new Date().toISOString()
+          ).run();
+          console.log(`Stored performance history for ${domain}: LCP=${cwv.LCP}ms`);
+        }
+      }
+    } catch (e) {
+      console.error(`Failed performance for ${domain}: ${e.message}`);
     }
   } else {
     console.log('D1 not available (env.DB is undefined)');
@@ -674,62 +694,83 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
   
   const existingKeys = new Set(existingIssues.results?.map(i => `${i.issue_type}|${i.page_path}`) || []);
   
-  // 4. Insert new issues, update existing ones
-  let inserted = 0, updated = 0;
-  for (const [key, issue] of currentIssues) {
-    if (existingKeys.has(key)) {
-      // Update last_seen
-      await db.prepare(`
-        UPDATE issues SET last_seen = ? WHERE domain = ? AND issue_type = ? AND page_path = ?
-      `).bind(auditDate, domain, issue.type, issue.path).run();
-      updated++;
-    } else {
-      // Insert new issue
-      await db.prepare(`
+  // 4. Upsert all current issues using batched ON CONFLICT
+  // Handles: new issues (INSERT), existing open issues (UPDATE last_seen),
+  // AND previously-fixed issues that reappear (clears fixed_at)
+  const BATCH_SIZE = 25;
+  const issueEntries = [...currentIssues.entries()];
+  let upserted = 0;
+  
+  for (let i = 0; i < issueEntries.length; i += BATCH_SIZE) {
+    const batch = issueEntries.slice(i, i + BATCH_SIZE);
+    const stmts = batch.map(([key, issue]) => {
+      return db.prepare(`
         INSERT INTO issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate).run();
-      inserted++;
-    }
-  }
-  
-  console.log(`storeAuditInD1: Inserted ${inserted} new issues, updated ${updated} existing`);
-  
-  // 5. Mark fixed issues (exist in DB but not in current audit)
-  let fixed = 0;
-  for (const existing of (existingIssues.results || [])) {
-    const key = `${existing.issue_type}|${existing.page_path}`;
-    if (!currentIssues.has(key)) {
-      await db.prepare(`
-        UPDATE issues SET fixed_at = ? WHERE id = ?
-      `).bind(auditDate, existing.id).run();
-      fixed++;
-    }
-  }
-  
-  console.log(`storeAuditInD1: Marked ${fixed} issues as fixed`);
-  
-  // 6. Handle broken links
-  let brokenInserted = 0;
-  for (const broken of audit.brokenLinks || []) {
-    try {
-      const linkPath = new URL(broken.url).pathname;
-      
-      await db.prepare(`
-        INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(domain, link_path) DO UPDATE SET
-          status_code = excluded.status_code,
+        ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
+          severity = excluded.severity,
+          page_url = excluded.page_url,
+          details = excluded.details,
           last_seen = excluded.last_seen,
           fixed_at = NULL
-      `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate).run();
-      brokenInserted++;
-    } catch (e) {
-      console.error(`Error inserting broken link ${broken.url}: ${e.message}`);
+      `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate);
+    });
+    
+    await db.batch(stmts);
+    upserted += batch.length;
+  }
+  
+  console.log(`storeAuditInD1: Upserted ${upserted} issues`);
+  
+  // 5. Mark fixed issues - issues in DB that are NOT in current audit
+  const allUnfixed = await db.prepare(`
+    SELECT id, issue_type, page_path FROM issues 
+    WHERE domain = ? AND fixed_at IS NULL
+  `).bind(domain).all();
+  
+  const toFix = (allUnfixed.results || []).filter(existing => {
+    const key = `${existing.issue_type}|${existing.page_path}`;
+    return !currentIssues.has(key);
+  });
+  
+  if (toFix.length > 0) {
+    for (let i = 0; i < toFix.length; i += BATCH_SIZE) {
+      const batch = toFix.slice(i, i + BATCH_SIZE);
+      const stmts = batch.map(existing => {
+        return db.prepare(`UPDATE issues SET fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id);
+      });
+      await db.batch(stmts);
     }
   }
   
-  console.log(`storeAuditInD1: Inserted/updated ${brokenInserted} broken links`);
+  console.log(`storeAuditInD1: Marked ${toFix.length} issues as fixed`);
+  
+  // 6. Handle broken links (batched)
+  const brokenLinks = audit.brokenLinks || [];
+  if (brokenLinks.length > 0) {
+    for (let i = 0; i < brokenLinks.length; i += BATCH_SIZE) {
+      const batch = brokenLinks.slice(i, i + BATCH_SIZE);
+      const stmts = [];
+      for (const broken of batch) {
+        try {
+          const linkPath = new URL(broken.url).pathname;
+          stmts.push(db.prepare(`
+            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(domain, link_path) DO UPDATE SET
+              status_code = excluded.status_code,
+              last_seen = excluded.last_seen,
+              fixed_at = NULL
+          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate));
+        } catch (e) {
+          // skip invalid URLs
+        }
+      }
+      if (stmts.length > 0) await db.batch(stmts);
+    }
+  }
+  
+  console.log(`storeAuditInD1: Processed ${brokenLinks.length} broken links`);
   
   // Mark fixed broken links
   await db.prepare(`
@@ -737,8 +778,8 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
     WHERE domain = ? AND fixed_at IS NULL AND last_seen < ?
   `).bind(auditDate, domain, auditDate).run();
   
-  // 7. Handle accessibility issues
-  let a11yInserted = 0;
+  // 7. Handle accessibility issues (batched)
+  const a11yStmts = [];
   const currentA11yKeys = new Set();
   
   for (const page of audit.pages) {
@@ -750,29 +791,27 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
     for (const issue of page.accessibility.issues) {
       const key = `${issue.type}|${path}`;
       currentA11yKeys.add(key);
-      
-      // Store snippets as JSON string
       const snippetsJson = issue.snippets ? JSON.stringify(issue.snippets) : null;
       
-      try {
-        await db.prepare(`
-          INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
-            severity = excluded.severity,
-            issue_count = excluded.issue_count,
-            snippets = excluded.snippets,
-            last_seen = excluded.last_seen,
-            fixed_at = NULL
-        `).bind(domain, issue.type, issue.severity, path, url, issue.count, snippetsJson, auditDate, auditDate).run();
-        a11yInserted++;
-      } catch (e) {
-        console.error(`Error inserting a11y issue: ${e.message}`);
-      }
+      a11yStmts.push(db.prepare(`
+        INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
+          severity = excluded.severity,
+          issue_count = excluded.issue_count,
+          snippets = excluded.snippets,
+          last_seen = excluded.last_seen,
+          fixed_at = NULL
+      `).bind(domain, issue.type, issue.severity, path, url, issue.count, snippetsJson, auditDate, auditDate));
     }
   }
   
-  console.log(`storeAuditInD1: Inserted/updated ${a11yInserted} accessibility issues`);
+  for (let i = 0; i < a11yStmts.length; i += BATCH_SIZE) {
+    const batch = a11yStmts.slice(i, i + BATCH_SIZE);
+    await db.batch(batch);
+  }
+  
+  console.log(`storeAuditInD1: Upserted ${a11yStmts.length} accessibility issues`);
   
   // Mark fixed accessibility issues
   await db.prepare(`
