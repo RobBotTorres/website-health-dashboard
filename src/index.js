@@ -97,9 +97,156 @@ export default {
       return handleAllFixedIssues(env);
     }
     
+    // Cleanup: mark aria-label empty_buttons/empty_links as fixed
+    if (url.pathname === '/api/cleanup-a11y') {
+      if (!env.DB) {
+        return new Response(JSON.stringify({ error: 'DB not available' }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const result = await env.DB.prepare(`
+          UPDATE accessibility_issues SET fixed_at = ?
+          WHERE fixed_at IS NULL
+          AND issue_type IN ('empty_buttons', 'empty_links')
+          AND (snippets LIKE '%aria-label%' OR snippets LIKE '%title=%' OR snippets IS NULL)
+        `).bind(today).run();
+        return new Response(JSON.stringify({ 
+          status: 'Cleaned up aria-label false positives',
+          rowsUpdated: result.meta?.changes || 0
+        }), { headers: { 'Content-Type': 'application/json' } });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    
     // Store today's performance snapshot (call daily)
     if (url.pathname === '/api/store-performance') {
       return storePerformanceSnapshot(env);
+    }
+    
+    // Debug: diagnose cache ratio data across all properties
+    if (url.pathname === '/api/debug-cache') {
+      const results = {};
+      const properties = {
+        adair: 'adairfamilywines.com',
+        brcohn: 'brcohn.com',
+        clospegase: 'clospegase.com',
+        girard: 'girardwinery.com',
+        kunde: 'kunde.com',
+        viansa: 'viansa.com'
+      };
+      
+      // Check token
+      const tokenSet = !!env.CLOUDFLARE_API_TOKEN;
+      const tokenPreview = tokenSet ? env.CLOUDFLARE_API_TOKEN.substring(0, 8) + '...' : 'NOT SET';
+      
+      // Test token with a simple API call
+      let tokenValid = false;
+      let tokenError = null;
+      if (tokenSet) {
+        try {
+          const testRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+            headers: { 'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}` }
+          });
+          const testData = await testRes.json();
+          tokenValid = testData.success === true;
+          tokenError = testData.success ? null : JSON.stringify(testData.errors);
+        } catch (e) {
+          tokenError = e.message;
+        }
+      }
+      
+      // Check D1 performance_snapshots
+      let d1SnapshotCount = 0;
+      let d1SampleRow = null;
+      if (env.DB) {
+        try {
+          const count = await env.DB.prepare('SELECT COUNT(*) as cnt FROM performance_snapshots').first();
+          d1SnapshotCount = count?.cnt || 0;
+          d1SampleRow = await env.DB.prepare('SELECT domain, snapshot_date, cf_cache_ratio, cf_requests FROM performance_snapshots ORDER BY snapshot_date DESC LIMIT 1').first();
+        } catch(e) {
+          d1SampleRow = { error: e.message };
+        }
+      }
+      
+      // Test each property's Cloudflare GraphQL for cache data
+      const { startDate, endDate } = getDateRange(7);
+      const cfHeaders = { 'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' };
+      
+      for (const [propId, domain] of Object.entries(properties)) {
+        const prefix = propId.toUpperCase();
+        const zoneIdsRaw = env[`${prefix}_CF_ZONE_IDS`];
+        const zoneIds = zoneIdsRaw ? zoneIdsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+        
+        const propResult = {
+          domain,
+          zoneIdsConfigured: !!zoneIdsRaw,
+          zoneCount: zoneIds.length,
+          zoneIds: zoneIds.map(z => z.substring(0, 8) + '...'),
+          apiResults: []
+        };
+        
+        for (const zoneId of zoneIds) {
+          try {
+            const graphqlResult = await cloudflareGraphQL(cfHeaders, `
+              query {
+                viewer {
+                  zones(filter: {zoneTag: "${zoneId}"}) {
+                    httpRequests1dGroups(limit: 7, filter: {date_geq: "${startDate}", date_leq: "${endDate}"}, orderBy: [date_ASC]) {
+                      dimensions { date }
+                      sum { requests bytes cachedBytes }
+                    }
+                  }
+                }
+              }
+            `);
+            
+            const zones = graphqlResult?.data?.viewer?.zones || [];
+            const days = zones[0]?.httpRequests1dGroups || [];
+            let totalBytes = 0, totalCached = 0, totalReqs = 0;
+            
+            days.forEach(d => {
+              totalBytes += d.sum?.bytes || 0;
+              totalCached += d.sum?.cachedBytes || 0;
+              totalReqs += d.sum?.requests || 0;
+            });
+            
+            const cacheRatio = totalBytes > 0 ? (totalCached / totalBytes * 100).toFixed(1) : 'N/A (0 bytes)';
+            
+            propResult.apiResults.push({
+              zoneId: zoneId.substring(0, 8) + '...',
+              success: true,
+              daysReturned: days.length,
+              totalRequests: totalReqs,
+              totalBytes,
+              totalCachedBytes: totalCached,
+              cacheRatio,
+              rawErrors: graphqlResult?.errors || null,
+              sampleDay: days[0] ? { date: days[0].dimensions?.date, bytes: days[0].sum?.bytes, cachedBytes: days[0].sum?.cachedBytes } : null
+            });
+          } catch (e) {
+            propResult.apiResults.push({
+              zoneId: zoneId.substring(0, 8) + '...',
+              success: false,
+              error: e.message
+            });
+          }
+        }
+        
+        results[propId] = propResult;
+      }
+      
+      return new Response(JSON.stringify({
+        diagnosis: 'Cache Ratio Debug Report',
+        timestamp: new Date().toISOString(),
+        dateRange: { startDate, endDate },
+        token: { set: tokenSet, preview: tokenPreview, valid: tokenValid, error: tokenError },
+        d1Cache: { snapshotCount: d1SnapshotCount, latestRow: d1SampleRow },
+        deadCodeNote: 'fetchAndStorePerformance() is defined but never called - performance_snapshots table is likely empty',
+        properties: results
+      }, null, 2), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
     }
     
     // Lazy-load Cloudflare data (slow - external API)
@@ -142,26 +289,6 @@ export default {
       }
     }
     
-    // Comprehensive performance endpoint (Cloudflare + GA4 + CWV)
-    if (url.pathname === '/api/performance') {
-      const propertyId = url.searchParams.get('property');
-      const domain = url.searchParams.get('domain');
-      if (!propertyId || !domain) {
-        return new Response(JSON.stringify({ error: 'Missing property or domain parameter' }), {
-          status: 400, headers: { 'Content-Type': 'application/json' }
-        });
-      }
-      try {
-        const data = await fetchComprehensivePerformance(propertyId, domain, env);
-        return new Response(JSON.stringify(data), {
-          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' }
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json' }
-        });
-      }
-    }
     
     // Debug endpoint to check sitemap
     if (url.pathname === '/api/debug-sitemap') {
@@ -273,37 +400,36 @@ async function collectPerformanceSnapshot(env) {
   ];
   
   const today = new Date().toISOString().split('T')[0];
+  const now = new Date().toISOString();
   
-  for (const domain of domains) {
-    try {
-      const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+  // Fetch PageSpeed in parallel batches of 3 to avoid rate limits
+  const PARALLEL = 3;
+  for (let i = 0; i < domains.length; i += PARALLEL) {
+    const batch = domains.slice(i, i + PARALLEL);
+    const results = await Promise.allSettled(
+      batch.map(domain => fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).then(cwv => ({ domain, cwv })))
+    );
+    
+    // Store results in a single DB batch
+    const stmts = [];
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const { domain, cwv } = result.value;
+      if (!cwv || cwv.error) continue;
       
-      if (cwv && !cwv.error) {
-        await env.DB.prepare(`
-          INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(domain, date) DO UPDATE SET
-            lcp_ms = excluded.lcp_ms,
-            fcp_ms = excluded.fcp_ms,
-            cls = excluded.cls,
-            inp_ms = excluded.inp_ms,
-            ttfb_ms = excluded.ttfb_ms,
-            recorded_at = excluded.recorded_at
-        `).bind(
-          domain, 
-          today, 
-          cwv.LCP || null, 
-          cwv.FCP || null, 
-          cwv.CLS || null, 
-          cwv.INP || null, 
-          cwv.TTFB || null,
-          new Date().toISOString()
-        ).run();
-        
-        console.log(`Stored performance for ${domain}: LCP=${cwv.LCP}ms`);
-      }
-    } catch (e) {
-      console.error(`Performance error for ${domain}:`, e.message);
+      stmts.push(env.DB.prepare(`
+        INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(domain, date) DO UPDATE SET
+          lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
+          inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
+      `).bind(domain, today, cwv.LCP || null, cwv.FCP || null, cwv.CLS || null, cwv.INP || null, cwv.TTFB || null, now));
+      
+      console.log(`Stored performance for ${domain}: LCP=${cwv.LCP}ms`);
+    }
+    
+    if (stmts.length > 0) {
+      try { await env.DB.batch(stmts); } catch(e) { console.error('Performance batch store error:', e.message); }
     }
   }
 }
@@ -425,7 +551,7 @@ async function runFullSitemapAudit(domain, env) {
       });
       
       if (i + BATCH_SIZE < urlsToAudit.length) {
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
       }
     }
     
@@ -697,7 +823,7 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
   // 4. Upsert all current issues using batched ON CONFLICT
   // Handles: new issues (INSERT), existing open issues (UPDATE last_seen),
   // AND previously-fixed issues that reappear (clears fixed_at)
-  const BATCH_SIZE = 25;
+  const BATCH_SIZE = 50;
   const issueEntries = [...currentIssues.entries()];
   let upserted = 0;
   
@@ -745,40 +871,7 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
   
   console.log(`storeAuditInD1: Marked ${toFix.length} issues as fixed`);
   
-  // 6. Handle broken links (batched)
-  const brokenLinks = audit.brokenLinks || [];
-  if (brokenLinks.length > 0) {
-    for (let i = 0; i < brokenLinks.length; i += BATCH_SIZE) {
-      const batch = brokenLinks.slice(i, i + BATCH_SIZE);
-      const stmts = [];
-      for (const broken of batch) {
-        try {
-          const linkPath = new URL(broken.url).pathname;
-          stmts.push(db.prepare(`
-            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(domain, link_path) DO UPDATE SET
-              status_code = excluded.status_code,
-              last_seen = excluded.last_seen,
-              fixed_at = NULL
-          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate));
-        } catch (e) {
-          // skip invalid URLs
-        }
-      }
-      if (stmts.length > 0) await db.batch(stmts);
-    }
-  }
-  
-  console.log(`storeAuditInD1: Processed ${brokenLinks.length} broken links`);
-  
-  // Mark fixed broken links
-  await db.prepare(`
-    UPDATE broken_links SET fixed_at = ?
-    WHERE domain = ? AND fixed_at IS NULL AND last_seen < ?
-  `).bind(auditDate, domain, auditDate).run();
-  
-  // 7. Handle accessibility issues (batched)
+  // 6. Handle accessibility issues BEFORE broken links (runs earlier, less timeout risk)
   const a11yStmts = [];
   const currentA11yKeys = new Set();
   
@@ -813,9 +906,63 @@ async function storeAuditInD1(db, domain, auditDate, audit) {
   
   console.log(`storeAuditInD1: Upserted ${a11yStmts.length} accessibility issues`);
   
-  // Mark fixed accessibility issues
+  // Mark fixed accessibility issues - issues in DB that are NOT in current audit
+  try {
+    const allUnfixedA11y = await db.prepare(`
+      SELECT id, issue_type, page_path FROM accessibility_issues 
+      WHERE domain = ? AND fixed_at IS NULL
+    `).bind(domain).all();
+    
+    const toFixA11y = (allUnfixedA11y.results || []).filter(existing => {
+      const key = `${existing.issue_type}|${existing.page_path}`;
+      return !currentA11yKeys.has(key);
+    });
+    
+    if (toFixA11y.length > 0) {
+      for (let i = 0; i < toFixA11y.length; i += BATCH_SIZE) {
+        const batch = toFixA11y.slice(i, i + BATCH_SIZE);
+        const stmts = batch.map(existing => {
+          return db.prepare(`UPDATE accessibility_issues SET fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id);
+        });
+        await db.batch(stmts);
+      }
+    }
+    
+    console.log(`storeAuditInD1: Marked ${toFixA11y.length} a11y issues as fixed`);
+  } catch (e) {
+    console.error(`storeAuditInD1: Error marking a11y issues as fixed: ${e.message}`);
+  }
+  
+  // 7. Handle broken links (batched)
+  const brokenLinks = audit.brokenLinks || [];
+  if (brokenLinks.length > 0) {
+    for (let i = 0; i < brokenLinks.length; i += BATCH_SIZE) {
+      const batch = brokenLinks.slice(i, i + BATCH_SIZE);
+      const stmts = [];
+      for (const broken of batch) {
+        try {
+          const linkPath = new URL(broken.url).pathname;
+          stmts.push(db.prepare(`
+            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(domain, link_path) DO UPDATE SET
+              status_code = excluded.status_code,
+              last_seen = excluded.last_seen,
+              fixed_at = NULL
+          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate));
+        } catch (e) {
+          // skip invalid URLs
+        }
+      }
+      if (stmts.length > 0) await db.batch(stmts);
+    }
+  }
+  
+  console.log(`storeAuditInD1: Processed ${brokenLinks.length} broken links`);
+  
+  // Mark fixed broken links
   await db.prepare(`
-    UPDATE accessibility_issues SET fixed_at = ?
+    UPDATE broken_links SET fixed_at = ?
     WHERE domain = ? AND fixed_at IS NULL AND last_seen < ?
   `).bind(auditDate, domain, auditDate).run();
   
@@ -991,9 +1138,14 @@ async function fetchAndStorePerformance(env, domain, propertyId, dataDate) {
 // Audit a single page and extract internal links + accessibility
 async function auditSinglePageWithLinks(url, domain) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'WineHealthDashboard/1.0' }
+      headers: { 'User-Agent': 'WineHealthDashboard/1.0' },
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     
     if (!response.ok) {
       return {
@@ -1289,10 +1441,14 @@ async function checkBrokenLinks(urls) {
     const batch = urls.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(batch.map(async (url) => {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
         const response = await fetch(url, { 
           method: 'HEAD',
-          headers: { 'User-Agent': 'WineHealthDashboard/1.0' }
+          headers: { 'User-Agent': 'WineHealthDashboard/1.0' },
+          signal: controller.signal
         });
+        clearTimeout(timeout);
         if (response.status >= 400) {
           return { url, status: response.status };
         }
@@ -1690,7 +1846,7 @@ async function handleAccessibility(domain, env) {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=60'
+    'Cache-Control': 'no-cache'
   };
   
   if (!domain || !env.DB) {
@@ -1700,9 +1856,9 @@ async function handleAccessibility(domain, env) {
   try {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     
-    // Get accessibility issues with individual page details
+    // Get all unfixed accessibility issues
     const issues = await env.DB.prepare(`
-      SELECT issue_type, severity, page_path, page_url, issue_count, snippets, first_seen
+      SELECT id, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen
       FROM accessibility_issues 
       WHERE domain = ? AND fixed_at IS NULL
       ORDER BY 
@@ -1710,9 +1866,37 @@ async function handleAccessibility(domain, env) {
         issue_type, page_path
     `).bind(domain).all();
     
-    // Group by issue type
+    // IDs of false positive rows to auto-cleanup
+    const falsePositiveIds = [];
+    
+    // Group by issue type, with JS-level filtering for aria-label false positives
     const grouped = {};
     for (const row of issues.results || []) {
+      // Parse snippets
+      let snippets = [];
+      if (row.snippets) {
+        try { snippets = JSON.parse(row.snippets); } catch(e) {}
+      }
+      
+      // Filter: for empty_buttons/empty_links, remove snippets that have aria-label or title
+      if (row.issue_type === 'empty_buttons' || row.issue_type === 'empty_links') {
+        // Filter individual snippets to only keep truly problematic ones
+        const filtered = snippets.filter(s => !/aria-label/i.test(s) && !/\btitle\s*=/i.test(s));
+        
+        // If ALL snippets had aria-label/title, this is a complete false positive
+        if (filtered.length === 0) {
+          falsePositiveIds.push(row.id);
+          continue; // skip this row entirely
+        }
+        
+        // If some snippets were filtered, update count proportionally
+        if (filtered.length < snippets.length) {
+          const ratio = filtered.length / snippets.length;
+          row.issue_count = Math.max(1, Math.round((row.issue_count || 1) * ratio));
+          snippets = filtered;
+        }
+      }
+      
       if (!grouped[row.issue_type]) {
         grouped[row.issue_type] = {
           type: row.issue_type,
@@ -1727,12 +1911,6 @@ async function handleAccessibility(domain, env) {
       grouped[row.issue_type].pageCount++;
       if (row.first_seen >= weekAgo) grouped[row.issue_type].newThisWeek++;
       
-      // Parse snippets for this page
-      let snippets = [];
-      if (row.snippets) {
-        try { snippets = JSON.parse(row.snippets); } catch(e) {}
-      }
-      
       grouped[row.issue_type].pages.push({
         url: row.page_url,
         path: row.page_path,
@@ -1741,11 +1919,31 @@ async function handleAccessibility(domain, env) {
       });
     }
     
-    // Convert to array and limit pages per issue
-    const issueList = Object.values(grouped).map(g => ({
-      ...g,
-      pages: g.pages.slice(0, 50)
-    }));
+    // Auto-cleanup: mark false positives as fixed in DB (fire and forget)
+    if (falsePositiveIds.length > 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const BATCH = 50;
+      for (let i = 0; i < falsePositiveIds.length; i += BATCH) {
+        const batch = falsePositiveIds.slice(i, i + BATCH);
+        try {
+          const stmts = batch.map(id => 
+            env.DB.prepare('UPDATE accessibility_issues SET fixed_at = ? WHERE id = ?').bind(today, id)
+          );
+          await env.DB.batch(stmts);
+        } catch(e) {
+          console.error('Auto-cleanup error:', e.message);
+        }
+      }
+      console.log(`handleAccessibility: Auto-cleaned ${falsePositiveIds.length} aria-label false positives for ${domain}`);
+    }
+    
+    // Convert to array and limit pages per issue, exclude empty groups
+    const issueList = Object.values(grouped)
+      .filter(g => g.pageCount > 0)
+      .map(g => ({
+        ...g,
+        pages: g.pages.slice(0, 50)
+      }));
     
     return new Response(JSON.stringify({
       hasData: issueList.length > 0,
@@ -1869,31 +2067,21 @@ async function handleAllFixedIssues(env) {
   }
   
   try {
-    // Get all fixed SEO issues
-    const seoFixed = await env.DB.prepare(`
-      SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at
-      FROM issues 
-      WHERE fixed_at IS NOT NULL
+    // Single query with UNION ALL instead of two separate queries + JS merge
+    const allFixed = await env.DB.prepare(`
+      SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at, 'SEO' as category
+      FROM issues WHERE fixed_at IS NOT NULL
+      UNION ALL
+      SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at, 'Accessibility' as category
+      FROM accessibility_issues WHERE fixed_at IS NOT NULL
       ORDER BY fixed_at DESC
+      LIMIT 500
     `).all();
-    
-    // Get all fixed accessibility issues
-    const a11yFixed = await env.DB.prepare(`
-      SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at
-      FROM accessibility_issues 
-      WHERE fixed_at IS NOT NULL
-      ORDER BY fixed_at DESC
-    `).all();
-    
-    const allFixed = [
-      ...(seoFixed.results || []).map(i => ({ ...i, category: 'SEO' })),
-      ...(a11yFixed.results || []).map(i => ({ ...i, category: 'Accessibility' }))
-    ].sort((a, b) => new Date(b.fixed_at) - new Date(a.fixed_at));
     
     return new Response(JSON.stringify({
-      hasData: allFixed.length > 0,
-      totalFixed: allFixed.length,
-      issues: allFixed
+      hasData: (allFixed.results?.length || 0) > 0,
+      totalFixed: allFixed.results?.length || 0,
+      issues: allFixed.results || []
     }), { headers });
     
   } catch (e) {
@@ -2142,10 +2330,10 @@ async function handlePerformance(request, env) {
   }
   
   try {
-    // Try D1 cache first (unless fresh requested)
+    // Try D1 cache first (unless fresh requested) - only use if from today
     if (!fresh && env.DB) {
       const cached = await getPerformanceFromD1(env.DB, domain);
-      if (cached) {
+      if (cached && cached.snapshotDate === new Date().toISOString().split('T')[0]) {
         return new Response(JSON.stringify({ ...cached, fromCache: true }), { headers });
       }
     }
@@ -2159,12 +2347,47 @@ async function handlePerformance(request, env) {
       fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message }))
     ]);
     
-    return new Response(JSON.stringify({
-      cloudflare,
-      ga4,
-      cwv,
-      fromCache: false
-    }), { headers });
+    const result = { cloudflare, ga4, cwv, fromCache: false };
+    
+    // Write-through: cache in D1 for faster subsequent loads (fire and forget)
+    if (env.DB && cloudflare && !cloudflare.error) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const rs = cloudflare.responseStatus || {};
+        await env.DB.prepare(`
+          INSERT OR REPLACE INTO performance_snapshots (
+            domain, snapshot_date,
+            cf_requests, cf_requests_change, cf_bandwidth, cf_cache_ratio, cf_error_rate, cf_threats,
+            cf_2xx, cf_3xx, cf_4xx, cf_5xx,
+            cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
+            cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall,
+            ga4_sessions, ga4_sessions_change, ga4_users, ga4_users_change,
+            ga4_bounce_rate, ga4_avg_duration, ga4_engagement_rate, ga4_page_views, ga4_top_pages
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          domain, today,
+          cloudflare.requests || 0,
+          parseFloat(cloudflare.requestsChange) || 0,
+          cloudflare.bandwidth || '0 B',
+          parseFloat(cloudflare.cacheRatio) || 0,
+          parseFloat(cloudflare.errorRate) || 0,
+          cloudflare.threats || 0,
+          rs.success || 0, rs.redirect || 0, rs.clientError || 0, rs.serverError || 0,
+          cwv.LCP || null, cwv.lcpRating || null, cwv.INP || null, cwv.inpRating || null,
+          cwv.CLS ?? null, cwv.clsRating || null, cwv.FCP || null, cwv.fcpRating || null,
+          cwv.TTFB || null, cwv.overallCategory || null,
+          ga4.sessions || null, parseFloat(ga4.sessionsChange) || null,
+          ga4.newUsers || null, parseFloat(ga4.newUsersChange) || null,
+          parseFloat(ga4.bounceRate) || null, ga4.avgDuration || null,
+          parseFloat(ga4.engagementRate) || null, ga4.pageViews || null,
+          ga4.topPages ? JSON.stringify(ga4.topPages) : null
+        ).run();
+      } catch(e) {
+        console.error('D1 perf cache write error:', e.message);
+      }
+    }
+    
+    return new Response(JSON.stringify(result), { headers });
     
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
@@ -2245,6 +2468,7 @@ async function fetchCloudflareTraffic(creds, env) {
   let prevRequests = 0, prevPageViews = 0;
   let responseStatus = { success: 0, redirect: 0, clientError: 0, serverError: 0 };
   let dailyData = [];
+  let errors = null;
   
   for (const zoneId of creds.zoneIds) {
     try {
@@ -2264,6 +2488,12 @@ async function fetchCloudflareTraffic(creds, env) {
           }
         }
       `);
+      
+      // Check for GraphQL-level errors
+      if (result?.errors && result.errors.length > 0) {
+        if (!errors) errors = [];
+        errors.push(`Zone ${zoneId.substring(0,8)}... GraphQL: ${result.errors[0]?.message || 'Unknown error'}`);
+      }
       
       const data = result?.data?.viewer?.zones?.[0]?.httpRequests1dGroups || [];
       data.forEach(day => {
@@ -2310,13 +2540,25 @@ async function fetchCloudflareTraffic(creds, env) {
       });
       
     } catch (e) {
-      console.error(`Cloudflare traffic error:`, e);
+      console.error(`Cloudflare traffic error for zone ${zoneId}:`, e);
+      // Don't silently swallow - track zone-level failures
+      if (!errors) errors = [];
+      errors.push(`Zone ${zoneId.substring(0,8)}...: ${e.message}`);
     }
   }
   
   const cacheRatio = totalBytes > 0 ? (totalCachedBytes / totalBytes) * 100 : 0;
   const requestsChange = prevRequests > 0 ? ((totalRequests - prevRequests) / prevRequests) * 100 : 0;
   const pageViewsChange = prevPageViews > 0 ? ((totalPageViews - prevPageViews) / prevPageViews) * 100 : 0;
+  
+  // If all zones failed and we have zero data, report the error
+  if (totalRequests === 0 && totalBytes === 0 && errors && errors.length > 0) {
+    return {
+      error: 'Cloudflare API errors: ' + errors.join('; '),
+      requests: 0, bandwidth: '0 B', cacheRatio: '0.0', pageViews: 0,
+      threats: 0, responseStatus, errorRate: 0, dailyData: []
+    };
+  }
   
   return {
     requests: totalRequests,
@@ -2328,7 +2570,8 @@ async function fetchCloudflareTraffic(creds, env) {
     threats: totalThreats,
     responseStatus,
     errorRate: totalRequests > 0 ? ((responseStatus.clientError + responseStatus.serverError) / totalRequests * 100).toFixed(2) : 0,
-    dailyData
+    dailyData,
+    ...(errors ? { warnings: errors } : {})
   };
 }
 
@@ -4416,6 +4659,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Web Health Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234A0E0E'/%3E%3Ctext x='32' y='38' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-size='18' font-weight='700' letter-spacing='1' fill='white'%3EAFW%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -4761,7 +5006,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function lcpClass(v){if(!v)return'';return v<=2500?'good':v<=4000?'warning':'bad'}
     function fcpClass(v){if(!v)return'';return v<=1800?'good':v<=3000?'warning':'bad'}
     function cwvClass(rating){if(!rating)return'';const r=rating.toUpperCase();return r==='GOOD'||r==='FAST'?'good':r==='NEEDS_IMPROVEMENT'||r==='NEEDS IMPROVEMENT'||r==='AVERAGE'?'warning':'bad'}
-    function getIssueInfo(issueType){var info={missing_title:{desc:'Pages without a title tag. Title tags are critical for SEO as they appear in search results and browser tabs.',fix:'Add a unique, descriptive title tag to each page (50-60 characters). Include your primary keyword near the beginning.'},short_title:{desc:'Title tags that are too short (under 30 characters) may not fully describe the page content.',fix:'Expand titles to 50-60 characters. Include relevant keywords and make each title unique and descriptive.'},missing_description:{desc:'Pages without a meta description. While not a direct ranking factor, descriptions appear in search results and affect click-through rates.',fix:'Add a compelling meta description (150-160 characters) that summarizes the page content and includes a call-to-action.'},short_description:{desc:'Meta descriptions that are too short may not effectively communicate page content in search results.',fix:'Expand descriptions to 150-160 characters. Make them compelling and include relevant keywords naturally.'},missing_h1:{desc:'Pages without an H1 heading. The H1 is the main heading and helps search engines understand page content.',fix:'Add one clear H1 tag per page that describes the main topic. It should be visible and near the top of the content.'},multiple_h1:{desc:'Pages with more than one H1 tag. While not strictly wrong, having multiple H1s can confuse the page hierarchy.',fix:'Use only one H1 per page for the main title. Use H2-H6 for subheadings to create a clear content hierarchy.'},missing_schema:{desc:'Pages without structured data (Schema.org markup). Structured data helps search engines understand your content and can enable rich results.',fix:'Add relevant schema markup (LocalBusiness, Product, Organization, etc.) using JSON-LD format in the page head.'},schema_error:{desc:'Pages with invalid or malformed structured data that may not be recognized by search engines.',fix:'Validate your schema using the Google Rich Results Test tool and fix any errors or warnings.'},missing_alt:{desc:'Images without alt text. Alt text is essential for accessibility (screen readers) and helps search engines understand image content.',fix:'Add descriptive alt text to every image. Describe what the image shows, keep it concise (under 125 characters).'},empty_buttons:{desc:'Buttons without accessible text. Screen reader users cannot understand what these buttons do.',fix:'Add text content inside buttons, or use aria-label attribute.'},missing_labels:{desc:'Form inputs without associated labels. This makes forms difficult or impossible to use for screen reader users.',fix:'Add label elements linked to inputs via the for attribute.'},missing_lang:{desc:'Pages without a lang attribute on the HTML element. This helps screen readers pronounce content correctly.',fix:'Add lang attribute to your HTML tag (e.g. lang=en).'},low_contrast:{desc:'Text without enough contrast against its background, making it difficult to read for users with vision impairments.',fix:'Ensure text has at least 4.5:1 contrast ratio (3:1 for large text). Use a contrast checker tool to verify.'},heading_hierarchy:{desc:'Headings that skip levels (e.g., H1 to H3). This can confuse screen reader users navigating by headings.',fix:'Use headings in order: H1, H2, H3. Do not skip levels. Use CSS for styling instead of choosing headings by size.'},missing_canonical:{desc:'Pages without a canonical URL tag. Canonical tags help prevent duplicate content issues by telling search engines which version of a page is the primary one.',fix:'Add a canonical link tag in the head: <link rel="canonical" href="https://yoursite.com/page">'},canonical_mismatch:{desc:'The canonical URL points to a different page. This could be intentional (for similar pages) or an error that confuses search engines.',fix:'Verify the canonical URL is correct. If this page should be indexed, update the canonical to point to itself.'},invalid_canonical:{desc:'The canonical URL is malformed or invalid. Search engines may ignore it or misinterpret it.',fix:'Fix the canonical URL format. It should be a complete, valid URL starting with https://.'},missing_social_tags:{desc:'Pages missing most Open Graph and Twitter Card tags. Social sharing will show generic or incorrect previews.',fix:'Add og:title, og:description, og:image, and twitter:card tags to control how your pages appear when shared.'},partial_social_tags:{desc:'Some social meta tags are missing. Social previews may be incomplete on some platforms.',fix:'Add the missing Open Graph or Twitter Card tags for complete social sharing previews.'},images_no_lazy:{desc:'Images without lazy loading. This forces all images to load immediately, slowing down initial page load.',fix:'Add loading="lazy" to images below the fold. Keep above-fold images without lazy loading.'},images_no_dimensions:{desc:'Images without explicit width and height attributes. This causes layout shift (CLS) as images load.',fix:'Add width and height attributes to images to reserve space and prevent layout shift.'},images_not_webp:{desc:'Images using older formats (JPG, PNG) instead of modern WebP. WebP provides better compression and faster loading.',fix:'Convert images to WebP format. Most CDNs and image services can do this automatically.'},duplicate_title:{desc:'Multiple pages share the same title tag. Each page should have a unique title for better SEO and user experience.',fix:'Write unique, descriptive titles for each page that reflect its specific content.'},duplicate_description:{desc:'Multiple pages share the same meta description. Unique descriptions help each page stand out in search results.',fix:'Write unique meta descriptions for each page that summarize its specific content.'},error_404:{desc:'Pages returning 404 Not Found errors. These create poor user experience and waste crawl budget.',fix:'Either restore the missing content, redirect to a relevant page, or remove links pointing to this URL.'}};return info[issueType]||{desc:'This issue may affect SEO or accessibility.',fix:'Review the affected pages and address the issue based on web best practices.'}}
+    function getIssueInfo(issueType){var info={missing_title:{desc:'Pages without a title tag. Title tags are critical for SEO as they appear in search results and browser tabs.',fix:'Add a unique, descriptive title tag to each page (50-60 characters). Include your primary keyword near the beginning.'},short_title:{desc:'Title tags that are too short (under 30 characters) may not fully describe the page content.',fix:'Expand titles to 50-60 characters. Include relevant keywords and make each title unique and descriptive.'},missing_description:{desc:'Pages without a meta description. While not a direct ranking factor, descriptions appear in search results and affect click-through rates.',fix:'Add a compelling meta description (150-160 characters) that summarizes the page content and includes a call-to-action.'},short_description:{desc:'Meta descriptions that are too short may not effectively communicate page content in search results.',fix:'Expand descriptions to 150-160 characters. Make them compelling and include relevant keywords naturally.'},missing_h1:{desc:'Pages without an H1 heading. The H1 is the main heading and helps search engines understand page content.',fix:'Add one clear H1 tag per page that describes the main topic. It should be visible and near the top of the content.'},multiple_h1:{desc:'Pages with more than one H1 tag. While not strictly wrong, having multiple H1s can confuse the page hierarchy.',fix:'Use only one H1 per page for the main title. Use H2-H6 for subheadings to create a clear content hierarchy.'},missing_schema:{desc:'Pages without structured data (Schema.org markup). Structured data helps search engines understand your content and can enable rich results.',fix:'Add relevant schema markup (LocalBusiness, Product, Organization, etc.) using JSON-LD format in the page head.'},schema_error:{desc:'Pages with invalid or malformed structured data that may not be recognized by search engines.',fix:'Validate your schema using the Google Rich Results Test tool and fix any errors or warnings.'},missing_alt:{desc:'Images without alt text. Alt text is essential for accessibility (screen readers) and helps search engines understand image content.',fix:'Add descriptive alt text to every image. Describe what the image shows, keep it concise (under 125 characters).'},empty_buttons:{desc:'Buttons without accessible text. Screen reader users cannot understand what these buttons do.',fix:'Add text content inside buttons, or use aria-label attribute.'},empty_links:{desc:'Links without accessible text. Screen reader users cannot determine where these links navigate to.',fix:'Add text content inside links, or use aria-label attribute.'},no_skip_link:{desc:'Page lacks a skip navigation link. Keyboard and screen reader users must tab through the entire navigation on every page.',fix:'Add a skip link as the first focusable element: <a href="#main-content" class="skip-link">Skip to content</a>'},missing_labels:{desc:'Form inputs without associated labels. This makes forms difficult or impossible to use for screen reader users.',fix:'Add label elements linked to inputs via the for attribute.'},missing_lang:{desc:'Pages without a lang attribute on the HTML element. This helps screen readers pronounce content correctly.',fix:'Add lang attribute to your HTML tag (e.g. lang=en).'},low_contrast:{desc:'Text without enough contrast against its background, making it difficult to read for users with vision impairments.',fix:'Ensure text has at least 4.5:1 contrast ratio (3:1 for large text). Use a contrast checker tool to verify.'},heading_hierarchy:{desc:'Headings that skip levels (e.g., H1 to H3). This can confuse screen reader users navigating by headings.',fix:'Use headings in order: H1, H2, H3. Do not skip levels. Use CSS for styling instead of choosing headings by size.'},missing_canonical:{desc:'Pages without a canonical URL tag. Canonical tags help prevent duplicate content issues by telling search engines which version of a page is the primary one.',fix:'Add a canonical link tag in the head: <link rel="canonical" href="https://yoursite.com/page">'},canonical_mismatch:{desc:'The canonical URL points to a different page. This could be intentional (for similar pages) or an error that confuses search engines.',fix:'Verify the canonical URL is correct. If this page should be indexed, update the canonical to point to itself.'},invalid_canonical:{desc:'The canonical URL is malformed or invalid. Search engines may ignore it or misinterpret it.',fix:'Fix the canonical URL format. It should be a complete, valid URL starting with https://.'},missing_social_tags:{desc:'Pages missing most Open Graph and Twitter Card tags. Social sharing will show generic or incorrect previews.',fix:'Add og:title, og:description, og:image, and twitter:card tags to control how your pages appear when shared.'},partial_social_tags:{desc:'Some social meta tags are missing. Social previews may be incomplete on some platforms.',fix:'Add the missing Open Graph or Twitter Card tags for complete social sharing previews.'},images_no_lazy:{desc:'Images without lazy loading. This forces all images to load immediately, slowing down initial page load.',fix:'Add loading="lazy" to images below the fold. Keep above-fold images without lazy loading.'},images_no_dimensions:{desc:'Images without explicit width and height attributes. This causes layout shift (CLS) as images load.',fix:'Add width and height attributes to images to reserve space and prevent layout shift.'},images_not_webp:{desc:'Images using older formats (JPG, PNG) instead of modern WebP. WebP provides better compression and faster loading.',fix:'Convert images to WebP format. Most CDNs and image services can do this automatically.'},duplicate_title:{desc:'Multiple pages share the same title tag. Each page should have a unique title for better SEO and user experience.',fix:'Write unique, descriptive titles for each page that reflect its specific content.'},duplicate_description:{desc:'Multiple pages share the same meta description. Unique descriptions help each page stand out in search results.',fix:'Write unique meta descriptions for each page that summarize its specific content.'},error_404:{desc:'Pages returning 404 Not Found errors. These create poor user experience and waste crawl budget.',fix:'Either restore the missing content, redirect to a relevant page, or remove links pointing to this URL.'}};return info[issueType]||{desc:'This issue may affect SEO or accessibility.',fix:'Review the affected pages and address the issue based on web best practices.'}}
     function showIssueModal(type,idx){var data=type==='seo'?window.seoIssueData:type==='a11y'?window.a11yIssueData:window.overviewIssueData;if(!data||!data[idx])return;var issue=data[idx];var issueType=issue.issueType||issue.type||'';var title=type==='seo'?issue.message:type==='overview'?issue.issue:formatA11yIssue(issue.type,issue.count);var info=getIssueInfo(issueType);document.getElementById('modal-title').textContent=title;var html='<div style="background:var(--bg2);border-radius:8px;padding:14px;margin-bottom:16px"><p style="margin:0 0 10px;color:var(--text2)"><strong>What this means:</strong> '+info.desc+'</p><p style="margin:0;color:var(--green)"><strong>How to fix:</strong> '+info.fix+'</p></div>';html+='<p style="margin:0 0 12px;color:var(--text3);font-size:13px">'+(issue.pageCount||issue.count)+' affected page(s):</p><div style="max-height:350px;overflow-y:auto">';var pages=issue.pages||[];var urls=issue.urls||[];if(pages.length>0&&typeof pages[0]==='object'){pages.forEach(function(p){var href=p.url&&p.url.startsWith('http')?p.url:'https://www.'+currentDomain+(p.path||p.url||'');var displayUrl=p.path||p.url||'';html+='<div style="margin-bottom:12px;padding:10px;background:var(--bg);border-radius:6px;border-left:3px solid var(--border)"><a href="'+href+'" target="_blank" style="color:var(--blue);font-size:13px">'+escapeHtml(displayUrl)+'</a>';if(p.snippets&&p.snippets.length>0){p.snippets.forEach(function(s){html+='<pre style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px;margin:8px 0 0;overflow-x:auto;font-size:11px;color:var(--red);white-space:pre-wrap;word-break:break-all">'+escapeHtml(s)+'</pre>'})}html+='</div>'})}else{urls.forEach(function(u){var displayUrl=u;var href=u.startsWith('http')?u:'https://www.'+currentDomain+u;html+='<div style="margin-bottom:8px"><a href="'+href+'" target="_blank" style="color:var(--blue);font-size:13px">'+escapeHtml(displayUrl)+'</a></div>'});if(urls.length<(issue.pageCount||issue.count)){html+='<p style="color:var(--text3);font-style:italic;font-size:12px">...and '+((issue.pageCount||issue.count)-urls.length)+' more pages</p>'}}html+='</div>';document.getElementById('modal-body').innerHTML=html;document.getElementById('issue-modal').classList.add('active')}
     function showFixedModal(){var fixed=window.fixedIssuesData||[];if(fixed.length===0)return;document.getElementById('modal-title').textContent='Fixed This Week';var html='<p style="margin:0 0 16px;color:var(--text2)">Issues that have been resolved:</p>';fixed.forEach(function(i){html+='<div style="margin-bottom:16px;padding:12px;background:var(--bg2);border-radius:8px;border-left:3px solid var(--green)"><div style="font-weight:600;color:var(--green);margin-bottom:4px">OK '+i.message+'</div><div style="font-size:12px;color:var(--text3)">'+(i.urls||[]).slice(0,3).join(', ')+(i.count>3?' (+' +(i.count-3)+' more)':'')+'</div></div>'});document.getElementById('modal-body').innerHTML=html;document.getElementById('issue-modal').classList.add('active')}
     function showAllFixedModal(){var fixed=window.allFixedIssuesData||[];if(fixed.length===0)return;document.getElementById('modal-title').textContent='All Fixed Issues ('+fixed.length+')';var html='<div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center"><p style="margin:0;color:var(--text2)">All issues that have been resolved across all properties:</p><button onclick="exportFixedCSV()" style="padding:8px 16px;background:var(--green);color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">Export CSV</button></div>';html+='<div style="max-height:400px;overflow-y:auto">';var byDomain={};fixed.forEach(function(i){if(!byDomain[i.domain])byDomain[i.domain]=[];byDomain[i.domain].push(i)});Object.keys(byDomain).sort().forEach(function(domain){html+='<div style="margin-bottom:16px"><h4 style="margin:0 0 8px;color:var(--text);font-size:14px;border-bottom:1px solid var(--border);padding-bottom:4px">'+domain+' ('+byDomain[domain].length+')</h4>';byDomain[domain].slice(0,10).forEach(function(i){var fixedDate=i.fixed_at?fmtDatePST(i.fixed_at):'';html+='<div style="margin-bottom:8px;padding:8px;background:var(--bg2);border-radius:6px;border-left:3px solid var(--green);font-size:13px"><div style="display:flex;justify-content:space-between"><span style="color:var(--green)">OK '+formatIssueMsg(i.issue_type,1).replace('1 ','')+'</span><span style="color:var(--text3);font-size:11px">'+fixedDate+'</span></div><div style="color:var(--text3);font-size:11px;margin-top:2px">'+escapeHtml(i.page_path||'')+'</div></div>'});if(byDomain[domain].length>10)html+='<div style="color:var(--text3);font-size:12px;padding:4px 8px">+'+(byDomain[domain].length-10)+' more...</div>';html+='</div>'});html+='</div>';document.getElementById('modal-body').innerHTML=html;document.getElementById('issue-modal').classList.add('active')}
