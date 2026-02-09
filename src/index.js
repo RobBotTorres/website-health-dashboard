@@ -243,7 +243,7 @@ export default {
         dateRange: { startDate, endDate },
         token: { set: tokenSet, preview: tokenPreview, valid: tokenValid, error: tokenError },
         d1Cache: { snapshotCount: d1SnapshotCount, latestRow: d1SampleRow },
-        deadCodeNote: 'fetchAndStorePerformance() is defined but never called - performance_snapshots table is likely empty',
+        deadCodeNote: 'fetchAndStorePerformance() runs during scheduled audit and via /api/store-performance',
         properties: results
       }, null, 2), {
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -639,17 +639,6 @@ async function runFullSitemapAudit(domain, env) {
       }
     } catch (e) {
       console.error(`Failed performance for ${domain}: ${e.message}`);
-    }
-    
-    // 4. Fetch and store full performance snapshot (Cloudflare + GA4 + CWV) for instant dashboard loading
-    try {
-      const propertyId = getPropertyIdForDomain(domain);
-      if (propertyId) {
-        console.log(`Storing performance snapshot for ${domain}...`);
-        await fetchAndStorePerformance(env, domain, propertyId, today);
-      }
-    } catch (e) {
-      console.error(`Failed performance snapshot for ${domain}: ${e.message}`);
     }
     
     // 4. Fetch and store full performance snapshot (Cloudflare + GA4 + CWV) for instant dashboard loading
@@ -2334,7 +2323,8 @@ async function handlePerformance(request, env) {
   }
   
   try {
-    // Try D1 cache first (unless fresh requested) - use if less than 12 hours old
+    // Try D1 cache first (unless fresh requested)
+    let staleCache = null;
     if (!fresh && env.DB) {
       const cached = await getPerformanceFromD1(env.DB, domain);
       if (cached && cached.snapshotDate) {
@@ -2343,25 +2333,38 @@ async function handlePerformance(request, env) {
         if (ageHours < 24) {
           return new Response(JSON.stringify({ ...cached, fromCache: true }), { headers });
         }
+        // Keep stale cache as fallback in case live APIs fail
+        staleCache = cached;
       }
     }
     
     const creds = getCredentials(propertyId, env);
     
-    // Fetch all data in parallel
+    // Fetch all data in parallel - each with individual error handling
     const [cloudflare, ga4, cwv] = await Promise.all([
-      fetchCloudflareTraffic(creds.cloudflare, env),
-      fetchGA4Analytics(creds.ga4),
+      fetchCloudflareTraffic(creds.cloudflare, env).catch(e => ({ error: e.message })),
+      fetchGA4Analytics(creds.ga4).catch(e => ({ error: e.message })),
       fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message }))
     ]);
     
-    const result = { cloudflare, ga4, cwv, fromCache: false };
+    // Merge: use live data when available, fall back to stale cache for failed calls
+    const result = {
+      cloudflare: cloudflare?.error && staleCache?.cloudflare ? staleCache.cloudflare : cloudflare,
+      ga4: ga4?.error && staleCache?.ga4 && !staleCache.ga4.error ? staleCache.ga4 : ga4,
+      cwv: cwv?.error && staleCache?.cwv && !staleCache.cwv.error ? staleCache.cwv : cwv,
+      fromCache: false,
+      partialStale: !!(staleCache && (cloudflare?.error || ga4?.error || cwv?.error))
+    };
     
-    // Write-through: cache in D1 for faster subsequent loads (fire and forget)
+    // Write-through: cache in D1 for faster subsequent loads
+    // Merge with stale cache so we don't overwrite good data with nulls from failed API calls
     if (env.DB && cloudflare && !cloudflare.error) {
       try {
         const today = new Date().toISOString().split('T')[0];
         const rs = cloudflare.responseStatus || {};
+        // Use live data when available, fall back to stale cache
+        const mergedGa4 = ga4?.error ? (staleCache?.ga4 || {}) : ga4;
+        const mergedCwv = cwv?.error ? (staleCache?.cwv || {}) : cwv;
         await env.DB.prepare(`
           INSERT OR REPLACE INTO performance_snapshots (
             domain, snapshot_date,
@@ -2381,14 +2384,14 @@ async function handlePerformance(request, env) {
           parseFloat(cloudflare.errorRate) || 0,
           cloudflare.threats || 0,
           rs.success || 0, rs.redirect || 0, rs.clientError || 0, rs.serverError || 0,
-          cwv.LCP || null, cwv.lcpRating || null, cwv.INP || null, cwv.inpRating || null,
-          cwv.CLS ?? null, cwv.clsRating || null, cwv.FCP || null, cwv.fcpRating || null,
-          cwv.TTFB || null, cwv.overallCategory || null,
-          ga4.sessions || null, parseFloat(ga4.sessionsChange) || null,
-          ga4.newUsers || null, parseFloat(ga4.newUsersChange) || null,
-          parseFloat(ga4.bounceRate) || null, ga4.avgDuration || null,
-          parseFloat(ga4.engagementRate) || null, ga4.pageViews || null,
-          ga4.topPages ? JSON.stringify(ga4.topPages) : null
+          mergedCwv.LCP || null, mergedCwv.lcpRating || null, mergedCwv.INP || null, mergedCwv.inpRating || null,
+          mergedCwv.CLS ?? null, mergedCwv.clsRating || null, mergedCwv.FCP || null, mergedCwv.fcpRating || null,
+          mergedCwv.TTFB || null, mergedCwv.overallCategory || null,
+          mergedGa4.sessions || null, parseFloat(mergedGa4.sessionsChange) || null,
+          mergedGa4.newUsers || null, parseFloat(mergedGa4.newUsersChange) || null,
+          parseFloat(mergedGa4.bounceRate) || null, mergedGa4.avgDuration || null,
+          parseFloat(mergedGa4.engagementRate) || null, mergedGa4.pageViews || null,
+          mergedGa4.topPages ? JSON.stringify(mergedGa4.topPages) : null
         ).run();
       } catch(e) {
         console.error('D1 perf cache write error:', e.message);
