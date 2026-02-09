@@ -5032,4 +5032,4 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function escapeHtml(str){return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
   </script>
 </body>
-</html>`;s
+</html>`;
