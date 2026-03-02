@@ -732,7 +732,9 @@ export async function auditSinglePageWithLinks(url, domain) {
     }
 
     if (!html.match(/<html[^>]*lang=["'][^"']+["']/i)) {
-      a11yIssues.push({ type: 'missing_lang', count: 1, severity: 'high' });
+      const htmlTag = html.match(/<html[^>]*>/i);
+      const langSnippets = htmlTag ? [htmlTag[0].length > 500 ? htmlTag[0].substring(0, 500) + '...' : htmlTag[0]] : ['<html> (no lang attribute)'];
+      a11yIssues.push({ type: 'missing_lang', count: 1, severity: 'high', snippets: langSnippets });
     }
 
     const emptyLinkRegex = /<a([^>]*)>(\s*)<\/a>/gi;
@@ -749,10 +751,11 @@ export async function auditSinglePageWithLinks(url, domain) {
       a11yIssues.push({ type: 'empty_links', count: emptyLinkMatches.length, severity: 'medium', snippets: emptyLinkSnippets });
     }
 
-    const inputs = (html.match(/<input[^>]*type=["'](text|email|password|tel|number|search)["'][^>]*>/gi) || []).length;
+    const inputMatches = html.match(/<input[^>]*type=["'](text|email|password|tel|number|search)["'][^>]*>/gi) || [];
     const labels = (html.match(/<label[^>]*>/gi) || []).length;
-    if (inputs > labels) {
-      a11yIssues.push({ type: 'missing_labels', count: inputs - labels, severity: 'high' });
+    if (inputMatches.length > labels) {
+      const missingLabelSnippets = inputMatches.slice(0, 5).map(s => s.length > 500 ? s.substring(0, 500) + '...' : s);
+      a11yIssues.push({ type: 'missing_labels', count: inputMatches.length - labels, severity: 'high', snippets: missingLabelSnippets });
     }
 
     if (!html.match(/skip[- ]?(to[- ]?)?(main|content|nav)/i)) {
@@ -762,15 +765,19 @@ export async function auditSinglePageWithLinks(url, domain) {
     const headingOrder = html.match(/<h[1-6][^>]*>/gi) || [];
     let lastLevel = 0;
     let badHierarchy = false;
+    const hierarchySnippets = [];
     headingOrder.forEach(h => {
       const level = parseInt(h.match(/h([1-6])/i)[1]);
       if (level > lastLevel + 1 && lastLevel > 0) {
         badHierarchy = true;
+        if (hierarchySnippets.length < 5) {
+          hierarchySnippets.push('h' + lastLevel + ' → h' + level + ' (skipped h' + (lastLevel + 1) + ')');
+        }
       }
       lastLevel = level;
     });
     if (badHierarchy) {
-      a11yIssues.push({ type: 'heading_hierarchy', count: 1, severity: 'medium' });
+      a11yIssues.push({ type: 'heading_hierarchy', count: 1, severity: 'medium', snippets: hierarchySnippets });
     }
 
     const emptyBtnRegex = /<button([^>]*)>(\s*)<\/button>/gi;
