@@ -723,7 +723,7 @@ export async function auditSinglePageWithLinks(url, domain) {
     let missingAltSnippets = [];
     imgMatches.forEach(img => {
       if (!img.includes('alt=') || img.match(/alt=["']\s*["']/)) {
-        const snippet = img.length > 100 ? img.substring(0, 100) + '...' : img;
+        const snippet = img.length > 500 ? img.substring(0, 500) + '...' : img;
         if (missingAltSnippets.length < 5) missingAltSnippets.push(snippet);
       }
     });
@@ -744,7 +744,7 @@ export async function auditSinglePageWithLinks(url, domain) {
         emptyLinkMatches.push(linkMatch[0]);
       }
     }
-    const emptyLinkSnippets = emptyLinkMatches.slice(0, 5).map(l => l.length > 80 ? l.substring(0, 80) + '...' : l);
+    const emptyLinkSnippets = emptyLinkMatches.slice(0, 5).map(l => l.length > 500 ? l.substring(0, 500) + '...' : l);
     if (emptyLinkMatches.length > 0) {
       a11yIssues.push({ type: 'empty_links', count: emptyLinkMatches.length, severity: 'medium', snippets: emptyLinkSnippets });
     }
@@ -782,7 +782,7 @@ export async function auditSinglePageWithLinks(url, domain) {
         emptyButtonMatches.push(btnMatch[0]);
       }
     }
-    const emptyButtonSnippets = emptyButtonMatches.slice(0, 5).map(b => b.length > 80 ? b.substring(0, 80) + '...' : b);
+    const emptyButtonSnippets = emptyButtonMatches.slice(0, 5).map(b => b.length > 500 ? b.substring(0, 500) + '...' : b);
     if (emptyButtonMatches.length > 0) {
       a11yIssues.push({ type: 'empty_buttons', count: emptyButtonMatches.length, severity: 'high', snippets: emptyButtonSnippets });
     }
