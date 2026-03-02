@@ -1,0 +1,14 @@
+{
+  "name": "wine-health-dashboard",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:staging": "wrangler dev --env staging",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}

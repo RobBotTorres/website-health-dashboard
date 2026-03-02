@@ -1,0 +1,601 @@
+import { getGoogleAccessToken } from './google-auth.js';
+import { getDateRange, formatDuration } from './utils.js';
+import { getCredentials } from './config.js';
+
+export async function fetchGA4Analytics(creds) {
+  if (!creds.propertyId || !creds.credentials) {
+    return { error: 'GA4 not configured' };
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const propertyId = creds.propertyId;
+
+    const response = await fetch(
+      `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          dateRanges: [
+            { startDate: '7daysAgo', endDate: 'yesterday' },
+            { startDate: '14daysAgo', endDate: '8daysAgo' }
+          ],
+          metrics: [
+            { name: 'sessions' },
+            { name: 'averageSessionDuration' },
+            { name: 'screenPageViews' },
+            { name: 'bounceRate' },
+            { name: 'newUsers' },
+            { name: 'engagementRate' }
+          ]
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('GA4 API error:', errText);
+      return { error: 'GA4 API error', details: errText.substring(0, 200) };
+    }
+
+    const data = await response.json();
+    const rows = data.rows || [];
+
+    const current = rows[0]?.metricValues || [];
+    const previous = rows[1]?.metricValues || [];
+
+    const sessions = parseInt(current[0]?.value || 0);
+    const prevSessions = parseInt(previous[0]?.value || 0);
+    const avgDuration = parseFloat(current[1]?.value || 0);
+    const pageViews = parseInt(current[2]?.value || 0);
+    const bounceRate = parseFloat(current[3]?.value || 0) * 100;
+    const newUsers = parseInt(current[4]?.value || 0);
+    const prevNewUsers = parseInt(previous[4]?.value || 0);
+    const engagementRate = parseFloat(current[5]?.value || 0) * 100;
+
+    const sessionsChange = prevSessions > 0 ? ((sessions - prevSessions) / prevSessions) * 100 : 0;
+    const newUsersChange = prevNewUsers > 0 ? ((newUsers - prevNewUsers) / prevNewUsers) * 100 : 0;
+
+    // Get top pages
+    const pagesResponse = await fetch(
+      `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '7daysAgo', endDate: 'yesterday' }],
+          dimensions: [{ name: 'pagePath' }],
+          metrics: [{ name: 'screenPageViews' }, { name: 'averageSessionDuration' }],
+          orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
+          limit: 10
+        })
+      }
+    );
+
+    let topPages = [];
+    if (pagesResponse.ok) {
+      const pagesData = await pagesResponse.json();
+      topPages = (pagesData.rows || []).map(row => ({
+        path: row.dimensionValues[0]?.value || '/',
+        views: parseInt(row.metricValues[0]?.value || 0),
+        avgTime: parseFloat(row.metricValues[1]?.value || 0).toFixed(1)
+      }));
+    }
+
+    return {
+      sessions,
+      sessionsChange: sessionsChange.toFixed(1),
+      newUsers,
+      newUsersChange: newUsersChange.toFixed(1),
+      pageViews,
+      bounceRate: bounceRate.toFixed(1),
+      avgDuration: formatDuration(avgDuration),
+      avgDurationSec: avgDuration,
+      engagementRate: engagementRate.toFixed(1),
+      topPages
+    };
+
+  } catch (e) {
+    console.error('GA4 error:', e);
+    return { error: e.message };
+  }
+}
+
+export async function fetchGA4Performance(creds) {
+  if (!creds.propertyId || !creds.credentials) {
+    return { error: 'GA4 not configured', note: 'Add GA4_PROPERTY_ID to enable' };
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const propertyId = creds.propertyId;
+
+    const response = await fetch(
+      `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          dateRanges: [
+            { startDate: '7daysAgo', endDate: 'today' },
+            { startDate: '14daysAgo', endDate: '8daysAgo' }
+          ],
+          metrics: [
+            { name: 'sessions' },
+            { name: 'totalUsers' },
+            { name: 'bounceRate' },
+            { name: 'averageSessionDuration' },
+            { name: 'engagementRate' },
+            { name: 'screenPageViews' }
+          ]
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('GA4 API error:', errorText);
+      return { error: 'GA4 API error', details: errorText };
+    }
+
+    const data = await response.json();
+    const rows = data.rows || [];
+
+    const current = rows[0]?.metricValues || [];
+    const previous = rows[1]?.metricValues || [];
+
+    const sessions = parseInt(current[0]?.value || 0);
+    const users = parseInt(current[1]?.value || 0);
+    const bounceRate = parseFloat(current[2]?.value || 0) * 100;
+    const avgDuration = parseFloat(current[3]?.value || 0);
+    const engagementRate = parseFloat(current[4]?.value || 0) * 100;
+    const pageViews = parseInt(current[5]?.value || 0);
+
+    const prevSessions = parseInt(previous[0]?.value || 0);
+    const prevUsers = parseInt(previous[1]?.value || 0);
+
+    return {
+      sessions,
+      users,
+      bounceRate: bounceRate.toFixed(1),
+      avgDuration: formatDuration(avgDuration),
+      avgDurationSec: avgDuration,
+      engagementRate: engagementRate.toFixed(1),
+      pageViews,
+      sessionsChange: prevSessions > 0 ? (((sessions - prevSessions) / prevSessions) * 100).toFixed(1) : '0',
+      usersChange: prevUsers > 0 ? (((users - prevUsers) / prevUsers) * 100).toFixed(1) : '0'
+    };
+
+  } catch (e) {
+    console.error('GA4 fetch error:', e);
+    return { error: e.message };
+  }
+}
+
+export async function fetchSearchConsoleSummary(creds) {
+  if (!creds.credentials || creds.properties.length === 0) {
+    return { error: 'Search Console not configured' };
+  }
+
+  try {
+    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const { startDate, endDate } = getDateRange(7);
+
+    let totalClicks = 0, totalImpressions = 0, weightedPosition = 0, positionWeight = 0;
+
+    for (const siteUrl of creds.properties) {
+      try {
+        const response = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate, endDate, dimensions: [], rowLimit: 1 })
+          }
+        );
+
+        if (!response.ok) continue;
+        const data = await response.json();
+        const row = data.rows?.[0];
+
+        if (row) {
+          totalClicks += row.clicks || 0;
+          totalImpressions += row.impressions || 0;
+          weightedPosition += (row.position || 0) * (row.impressions || 0);
+          positionWeight += row.impressions || 0;
+        }
+      } catch (e) {
+        console.error(`GSC error for ${siteUrl}:`, e);
+      }
+    }
+
+    const avgPosition = positionWeight > 0 ? weightedPosition / positionWeight : null;
+    const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
+
+    return {
+      clicks: totalClicks, impressions: totalImpressions,
+      ctr: ctr ? ctr.toFixed(2) + '%' : 'N/A', ctrNum: ctr,
+      position: avgPosition ? avgPosition.toFixed(1) : 'N/A', positionNum: avgPosition
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+export async function fetchSearchConsoleDetail(creds) {
+  const summary = await fetchSearchConsoleSummary(creds);
+  if (summary.error) return summary;
+
+  try {
+    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const { startDate, endDate } = getDateRange(7);
+    const { startDate: prevStartDate, endDate: prevEndDate } = getDateRange(7, 7);
+
+    let topQueries = [], topPages = [], indexingStatus = [], indexingIssues = [];
+    let prevQueryData = {};
+
+    for (const siteUrl of creds.properties) {
+      try {
+        const prevQueriesResponse = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate: prevStartDate, endDate: prevEndDate, dimensions: ['query'], rowLimit: 100 })
+          }
+        );
+
+        if (prevQueriesResponse.ok) {
+          const prevData = await prevQueriesResponse.json();
+          (prevData.rows || []).forEach(row => {
+            const query = row.keys[0].toLowerCase().trim();
+            prevQueryData[query] = { position: row.position, clicks: row.clicks, impressions: row.impressions };
+          });
+        }
+
+        const queriesResponse = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate, endDate, dimensions: ['query'], rowLimit: 50 })
+          }
+        );
+
+        if (queriesResponse.ok) {
+          const queriesData = await queriesResponse.json();
+          topQueries = topQueries.concat((queriesData.rows || []).map(row => {
+            const query = row.keys[0];
+            const queryKey = query.toLowerCase().trim();
+            const prev = prevQueryData[queryKey];
+            const positionChange = prev ? (prev.position - row.position) : null;
+            return {
+              query: query,
+              clicks: row.clicks,
+              impressions: row.impressions,
+              ctr: ((row.clicks / row.impressions) * 100).toFixed(2) + '%',
+              position: row.position.toFixed(1),
+              positionNum: row.position,
+              positionChange: positionChange,
+              prevPosition: prev ? prev.position.toFixed(1) : null
+            };
+          }));
+        }
+
+        const pagesResponse = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate, endDate, dimensions: ['page'], rowLimit: 25 })
+          }
+        );
+
+        if (pagesResponse.ok) {
+          const pagesData = await pagesResponse.json();
+          topPages = topPages.concat((pagesData.rows || []).map(row => ({
+            page: row.keys[0], clicks: row.clicks, impressions: row.impressions,
+            ctr: ((row.clicks / row.impressions) * 100).toFixed(2) + '%', position: row.position.toFixed(1)
+          })));
+        }
+
+        const sitemapsResponse = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps`,
+          { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+
+        if (sitemapsResponse.ok) {
+          const sitemapsData = await sitemapsResponse.json();
+          for (const sm of (sitemapsData.sitemap || [])) {
+            let submitted = 0, indexed = 0;
+            (sm.contents || []).forEach(c => {
+              submitted += parseInt(c.submitted) || 0;
+              indexed += parseInt(c.indexed) || 0;
+            });
+
+            indexingStatus.push({
+              sitemap: sm.path,
+              warnings: parseInt(sm.warnings) || 0,
+              errors: parseInt(sm.errors) || 0,
+              submitted: submitted,
+              indexed: indexed,
+              isPending: sm.isPending || false,
+              lastDownloaded: sm.lastDownloaded,
+              lastSubmitted: sm.lastSubmitted,
+              siteUrl: siteUrl
+            });
+
+            if (sm.errors > 0 || (submitted > 0 && indexed < submitted * 0.9)) {
+              const issues = await inspectSitemapUrls(sm.path, siteUrl, accessToken, 10);
+              indexingIssues = indexingIssues.concat(issues);
+            }
+          }
+        }
+
+      } catch (e) {
+        console.error(`GSC detail error for ${siteUrl}:`, e);
+      }
+    }
+
+    topQueries = topQueries.sort((a, b) => b.clicks - a.clicks);
+    topPages = topPages.sort((a, b) => b.clicks - a.clicks).slice(0, 10);
+
+    const movers = [...topQueries]
+      .filter(q => q.positionChange !== null && Math.abs(q.positionChange) >= 0.5 && q.impressions >= 10)
+      .sort((a, b) => Math.abs(b.positionChange) - Math.abs(a.positionChange))
+      .slice(0, 10);
+
+    return { ...summary, topQueries, topPages, indexingStatus, indexingIssues, movers, siteUrls: creds.properties };
+  } catch (error) {
+    return { ...summary, detailError: error.message };
+  }
+}
+
+export async function inspectSitemapUrls(sitemapUrl, siteUrl, accessToken, maxUrls = 10) {
+  const issues = [];
+
+  try {
+    const sitemapResponse = await fetch(sitemapUrl);
+    if (!sitemapResponse.ok) return issues;
+
+    const sitemapXml = await sitemapResponse.text();
+
+    const urlMatches = sitemapXml.match(/<loc>([^<]+)<\/loc>/g) || [];
+    const urls = urlMatches.map(m => m.replace(/<\/?loc>/g, '')).slice(0, maxUrls);
+
+    for (const url of urls) {
+      try {
+        const inspectResponse = await fetch(
+          'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect',
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inspectionUrl: url, siteUrl: siteUrl })
+          }
+        );
+
+        if (inspectResponse.ok) {
+          const data = await inspectResponse.json();
+          const result = data.inspectionResult;
+          const indexStatus = result?.indexStatusResult;
+
+          if (indexStatus && indexStatus.coverageState !== 'Submitted and indexed') {
+            issues.push({
+              url: url,
+              status: indexStatus.coverageState || 'Unknown',
+              verdict: indexStatus.verdict || 'Unknown',
+              robotsTxtState: indexStatus.robotsTxtState,
+              indexingState: indexStatus.indexingState,
+              lastCrawlTime: indexStatus.lastCrawlTime,
+              pageFetchState: indexStatus.pageFetchState,
+              crawledAs: indexStatus.crawledAs,
+              googleCanonical: indexStatus.googleCanonical,
+              userCanonical: indexStatus.userCanonical,
+              referringUrls: indexStatus.referringUrls,
+              sitemap: sitemapUrl.split('/').pop()
+            });
+          }
+        }
+      } catch (e) {
+        console.error(`URL inspection error for ${url}:`, e);
+      }
+    }
+  } catch (e) {
+    console.error(`Sitemap fetch error for ${sitemapUrl}:`, e);
+  }
+
+  return issues;
+}
+
+export async function fetchAndStoreSearchConsole(env, domain, propertyId, dataDate) {
+  try {
+    const creds = getCredentials(propertyId, env);
+    if (!creds.searchConsole.properties.length || !creds.searchConsole.credentials) {
+      console.log(`No Search Console credentials for ${propertyId}`);
+      return;
+    }
+
+    const accessToken = await getGoogleAccessToken(creds.searchConsole.credentials);
+    const { startDate, endDate } = getDateRange(28);
+    const { startDate: prevStartDate, endDate: prevEndDate } = getDateRange(28, 28);
+
+    let prevQueryData = {};
+    let keywords = [];
+
+    for (const siteUrl of creds.searchConsole.properties) {
+      try {
+        const prevResponse = await fetch(
+          `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate: prevStartDate, endDate: prevEndDate, dimensions: ['query'], rowLimit: 100 })
+          }
+        );
+        if (prevResponse.ok) {
+          const prevData = await prevResponse.json();
+          (prevData.rows || []).forEach(row => {
+            prevQueryData[row.keys[0].toLowerCase().trim()] = row.position;
+          });
+        }
+      } catch (e) {
+        console.log(`Could not fetch previous period SC data: ${e.message}`);
+      }
+
+      const response = await fetch(
+        `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate, endDate, dimensions: ['query'], rowLimit: 100 })
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        keywords = keywords.concat((data.rows || []).map(row => {
+          const query = row.keys[0];
+          const prevPos = prevQueryData[query.toLowerCase().trim()];
+          return {
+            query,
+            clicks: row.clicks,
+            impressions: row.impressions,
+            ctr: row.clicks / row.impressions,
+            position: row.position,
+            prevPosition: prevPos || null,
+            positionChange: prevPos ? (prevPos - row.position) : null
+          };
+        }));
+      }
+    }
+
+    keywords.sort((a, b) => b.clicks - a.clicks);
+    keywords = keywords.slice(0, 50);
+
+    if (env.DB && keywords.length > 0) {
+      await env.DB.prepare(`DELETE FROM keywords WHERE domain = ? AND data_date = ?`).bind(domain, dataDate).run();
+
+      for (const kw of keywords) {
+        await env.DB.prepare(`
+          INSERT INTO keywords (domain, query, clicks, impressions, ctr, position, prev_position, position_change, data_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(domain, kw.query, kw.clicks, kw.impressions, kw.ctr, kw.position, kw.prevPosition, kw.positionChange, dataDate).run();
+      }
+      console.log(`Stored ${keywords.length} keywords for ${domain}`);
+    }
+  } catch (e) {
+    console.error(`Failed to fetch/store Search Console data: ${e.message}`);
+  }
+}
+
+export async function fetchPageSpeedInsights(domain, apiKey) {
+  const domainsToTry = [`www.${domain}`, `shop.${domain}`, domain];
+
+  for (const testDomain of domainsToTry) {
+    try {
+      let url = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https://${testDomain}&strategy=mobile&category=performance`;
+      if (apiKey) {
+        url += `&key=${apiKey}`;
+      }
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        console.error(`PageSpeed API error for ${testDomain}: ${response.status}`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        console.error(`PageSpeed API returned error for ${testDomain}:`, data.error);
+        continue;
+      }
+
+      const crux = data.loadingExperience?.metrics || {};
+      const originCrux = data.originLoadingExperience?.metrics || {};
+
+      const metrics = Object.keys(originCrux).length > 0 ? originCrux : crux;
+
+      if (Object.keys(metrics).length === 0) {
+        console.log(`No CrUX data for ${testDomain}, trying next...`);
+        continue;
+      }
+
+      const result = {
+        LCP: metrics.LARGEST_CONTENTFUL_PAINT_MS?.percentile || null,
+        INP: metrics.INTERACTION_TO_NEXT_PAINT?.percentile || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.percentile || null,
+        CLS: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.percentile ? metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile / 100 : null,
+        FCP: metrics.FIRST_CONTENTFUL_PAINT_MS?.percentile || null,
+        TTFB: metrics.EXPERIMENTAL_TIME_TO_FIRST_BYTE?.percentile || null,
+        FID: metrics.FIRST_INPUT_DELAY_MS?.percentile || null,
+
+        lcpRating: metrics.LARGEST_CONTENTFUL_PAINT_MS?.category || null,
+        inpRating: metrics.INTERACTION_TO_NEXT_PAINT?.category || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.category || null,
+        clsRating: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.category || null,
+        fcpRating: metrics.FIRST_CONTENTFUL_PAINT_MS?.category || null,
+
+        overallCategory: data.loadingExperience?.overall_category || data.originLoadingExperience?.overall_category || null,
+
+        source: Object.keys(originCrux).length > 0 ? 'origin' : 'url',
+        testedDomain: testDomain
+      };
+
+      return result;
+    } catch (error) {
+      console.error(`PageSpeed fetch error for ${testDomain}:`, error);
+      continue;
+    }
+  }
+
+  return { note: 'No CrUX data available (needs more Chrome traffic)' };
+}
+
+export async function fetchCoreWebVitals(domain) {
+  try {
+    const url = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https://www.${domain}&category=performance&strategy=mobile`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      return { error: 'PageSpeed API error' };
+    }
+
+    const data = await response.json();
+    const crux = data.loadingExperience || {};
+    const metrics = crux.metrics || {};
+
+    const lcp = metrics.LARGEST_CONTENTFUL_PAINT_MS;
+    const inp = metrics.INTERACTION_TO_NEXT_PAINT;
+    const cls = metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE;
+    const fcp = metrics.FIRST_CONTENTFUL_PAINT_MS;
+    const ttfb = metrics.EXPERIMENTAL_TIME_TO_FIRST_BYTE;
+
+    return {
+      LCP: lcp?.percentile,
+      lcpRating: lcp?.category,
+      INP: inp?.percentile,
+      inpRating: inp?.category,
+      CLS: cls?.percentile ? cls.percentile / 100 : null,
+      clsRating: cls?.category,
+      FCP: fcp?.percentile,
+      fcpRating: fcp?.category,
+      TTFB: ttfb?.percentile,
+      ttfbRating: ttfb?.category,
+      overallCategory: crux.overall_category
+    };
+
+  } catch (e) {
+    console.error('CWV fetch error:', e);
+    return { error: e.message };
+  }
+}
