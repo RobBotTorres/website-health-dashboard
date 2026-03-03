@@ -29,12 +29,12 @@ name = "wine-health-dashboard-staging"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "wine-seo-audits-staging"
-database_id = "<STAGING_D1_ID_HERE>"
+database_id = "9f5ca614-0ff3-4202-b221-7e5a83a077b8"
 
 # Staging KV — replace with your staging KV namespace ID
 [[env.staging.kv_namespaces]]
 binding = "SEO_AUDITS"
-id = "<STAGING_KV_ID_HERE>"
+id = "5483be90be8440028b492de4300cace6"
 
 [env.staging.vars]
 ADAIR_CF_ZONE_IDS = "3c6f5ec53c64d53b13a3edb15bc86d79,91f16d65b970bfe14bdd005466c305e6"
