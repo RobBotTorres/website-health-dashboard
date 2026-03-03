@@ -322,7 +322,7 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
       currentIssues.set(`missing_title|${path}`, { type: 'missing_title', severity: 'high', path, url, details: null });
       issueCount++;
     } else if (page.title?.status === 'too_short') {
-      currentIssues.set(`short_title|${path}`, { type: 'short_title', severity: 'medium', path, url, details: JSON.stringify({ length: page.title.length }) });
+      currentIssues.set(`short_title|${path}`, { type: 'short_title', severity: 'medium', path, url, details: JSON.stringify({ length: page.title.length, value: page.title.value }) });
       issueCount++;
     }
 
@@ -330,7 +330,7 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
       currentIssues.set(`missing_description|${path}`, { type: 'missing_description', severity: 'high', path, url, details: null });
       issueCount++;
     } else if (page.description?.status === 'too_short') {
-      currentIssues.set(`short_description|${path}`, { type: 'short_description', severity: 'medium', path, url, details: JSON.stringify({ length: page.description.length }) });
+      currentIssues.set(`short_description|${path}`, { type: 'short_description', severity: 'medium', path, url, details: JSON.stringify({ length: page.description.length, value: page.description.value }) });
       issueCount++;
     }
 

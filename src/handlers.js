@@ -800,6 +800,7 @@ async function getActionableDataFromD1(db, domain) {
     SELECT issue_type, severity, COUNT(*) as count,
            GROUP_CONCAT(page_url, '|||') as urls,
            GROUP_CONCAT(page_path, '|||') as paths,
+           GROUP_CONCAT(COALESCE(details, ''), '|||') as all_details,
            MIN(first_seen) as oldest,
            SUM(CASE WHEN first_seen >= ? THEN 1 ELSE 0 END) as new_this_week
     FROM issues
@@ -844,13 +845,32 @@ async function getActionableDataFromD1(db, domain) {
     ORDER BY week
   `).bind(domain, domain).all();
 
-  const actionItems = openIssues.results.map(i => ({
-    type: i.issue_type, severity: i.severity, count: i.count,
-    newThisWeek: i.new_this_week,
-    message: formatIssueMessage(i.issue_type, i.count),
-    urls: i.urls ? i.urls.split('|||').slice(0, 100) : [],
-    pages: i.paths ? i.paths.split('|||').slice(0, 100) : []
-  }));
+  const actionItems = openIssues.results.map(i => {
+    const paths = i.paths ? i.paths.split('|||').slice(0, 100) : [];
+    const urls = i.urls ? i.urls.split('|||').slice(0, 100) : [];
+    const details = i.all_details ? i.all_details.split('|||').slice(0, 100) : [];
+    const hasValues = ['short_title', 'short_description'].includes(i.issue_type);
+    let pages;
+    if (hasValues && details.length > 0) {
+      const label = i.issue_type === 'short_title' ? 'Title' : 'Description';
+      pages = paths.map((p, idx) => {
+        let snippet = null;
+        try {
+          const d = details[idx] ? JSON.parse(details[idx]) : null;
+          if (d && d.value) snippet = `Current ${label} (${d.length} chars): "${d.value}"`;
+        } catch(e) {}
+        return { path: p, url: urls[idx] || '', snippets: snippet ? [snippet] : [] };
+      });
+    } else {
+      pages = paths;
+    }
+    return {
+      type: i.issue_type, severity: i.severity, count: i.count,
+      newThisWeek: i.new_this_week,
+      message: formatIssueMessage(i.issue_type, i.count),
+      urls, pages
+    };
+  });
 
   const totalOpen = openIssues.results.reduce((sum, i) => sum + i.count, 0);
 
