@@ -2,6 +2,7 @@ import { getPropertyIdForDomain, getCredentials } from './config.js';
 import { fetchPageSpeedInsights, fetchAndStoreSearchConsole } from './google-api.js';
 import { fetchCloudflareTraffic } from './cloudflare-api.js';
 import { fetchGA4Analytics } from './google-api.js';
+import { getDateRangePST } from './utils.js';
 
 // Run full SEO audit for all properties
 export async function runScheduledAudit(env) {
@@ -45,7 +46,7 @@ export async function collectPerformanceSnapshot(env) {
     'adairfamilywines.com'
   ];
 
-  const today = new Date().toISOString().split('T')[0];
+  const { endDate: today } = getDateRangePST(0);
   const now = new Date().toISOString();
 
   const PARALLEL = 3;
@@ -81,7 +82,7 @@ export async function collectPerformanceSnapshot(env) {
 // Full sitemap audit - crawls ALL pages and stores in D1
 export async function runFullSitemapAudit(domain, env) {
   const startTime = Date.now();
-  const today = new Date().toISOString().split('T')[0];
+  const { endDate: today } = getDateRangePST(0);
 
   const audit = {
     domain,
