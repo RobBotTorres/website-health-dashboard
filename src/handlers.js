@@ -433,7 +433,7 @@ export async function handleAccessibility(domain, env) {
     }
 
     if (falsePositiveIds.length > 0) {
-      const today = new Date().toISOString().split('T')[0];
+      const { endDate: today } = getDateRangePST(0);
       const BATCH = 50;
       for (let i = 0; i < falsePositiveIds.length; i += BATCH) {
         const batch = falsePositiveIds.slice(i, i + BATCH);
@@ -743,7 +743,7 @@ export async function storePerformanceSnapshot(env) {
     'adairfamilywines.com': 'adair'
   };
 
-  const today = new Date().toISOString().split('T')[0];
+  const { endDate: today } = getDateRangePST(0);
   const results = [];
 
   for (const [domain, propertyId] of Object.entries(domainMap)) {
@@ -785,8 +785,7 @@ export async function storePerformanceSnapshot(env) {
 // ============================================================================
 
 async function getActionableDataFromD1(db, domain) {
-  const today = new Date().toISOString().split('T')[0];
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const { startDate: weekAgo, endDate: today } = getDateRangePST(7);
 
   const latestAudit = await db.prepare(`
     SELECT audit_date, total_pages, pages_audited, duration_seconds
@@ -1020,7 +1019,7 @@ export async function fetchSearchConsoleData(propertyId, env) {
 
 async function getSEOStatsFromD1(db, domain) {
   try {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { startDate: weekAgo } = getDateRangePST(7);
 
     const stats = await db.prepare(`
       SELECT
