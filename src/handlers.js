@@ -1,5 +1,5 @@
 import { PROPERTIES, PROPERTY_IDS, getCredentials } from './config.js';
-import { getDateRange, formatIssueMessage, formatIssueStatus } from './utils.js';
+import { getDateRange, getDateRangePST, formatIssueMessage, formatIssueStatus } from './utils.js';
 import { cloudflareGraphQL, fetchCloudflareSummary, fetchCloudflareDetail, fetchCloudflareTraffic, fetchCloudflarePerformance } from './cloudflare-api.js';
 import { fetchGA4Analytics, fetchGA4Performance, fetchSearchConsoleSummary, fetchSearchConsoleDetail, fetchPageSpeedInsights, fetchCoreWebVitals } from './google-api.js';
 import { checkRobotsTxt, fetchAndStorePerformance } from './audit.js';
@@ -22,7 +22,7 @@ export async function handleAPI(request, env) {
 
     if (debugParam === 'vitals') {
       const zoneId = url.searchParams.get('zone') || '152084b83d9eccf45eee4eb6606bb9e0';
-      const { startDate, endDate } = getDateRange(7);
+      const { startDate, endDate } = getDateRangePST(7);
 
       const cfHeaders = {
         'Authorization': `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
@@ -244,7 +244,7 @@ export async function handlePerformance(request, env) {
 
     if (env.DB && cloudflare && !cloudflare.error) {
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const { endDate: today } = getDateRangePST(0);
         const rs = cloudflare.responseStatus || {};
         const mergedGa4 = ga4?.error ? (staleCache?.ga4 || {}) : ga4;
         const mergedCwv = cwv?.error ? (staleCache?.cwv || {}) : cwv;
@@ -304,7 +304,7 @@ export async function handleSEOStats(domain, env) {
   }
 
   try {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { startDate: weekAgo } = getDateRangePST(7);
 
     const stats = await env.DB.prepare(`
       SELECT
@@ -381,7 +381,7 @@ export async function handleAccessibility(domain, env) {
   }
 
   try {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { startDate: weekAgo } = getDateRangePST(7);
 
     const issues = await env.DB.prepare(`
       SELECT id, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen
@@ -576,8 +576,7 @@ export async function handle404Errors(propertyId, env) {
     }
 
     const zoneId = zoneIds.split(',')[0].trim();
-    const endDate = new Date().toISOString().split('T')[0];
-    const startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { startDate, endDate } = getDateRangePST(7);
 
     const query = `
       query {
@@ -651,12 +650,13 @@ export async function handlePerformanceHistory(env) {
   }
 
   try {
+    const { startDate, endDate } = getDateRangePST(7);
     const history = await env.DB.prepare(`
       SELECT domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms
       FROM performance_history
-      WHERE date >= date('now', '-7 days')
+      WHERE date >= ? AND date <= ?
       ORDER BY date ASC
-    `).all();
+    `).bind(startDate, endDate).all();
 
     const byDomain = {};
     for (const row of history.results || []) {
@@ -671,6 +671,8 @@ export async function handlePerformanceHistory(env) {
 
     return new Response(JSON.stringify({
       hasData: Object.keys(byDomain).length > 0,
+      startDate,
+      endDate,
       history: byDomain
     }), { headers });
 

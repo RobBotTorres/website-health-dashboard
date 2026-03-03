@@ -4,6 +4,14 @@ export function getDateRange(days, offsetDays = 0) {
   return { startDate: start.toISOString().split('T')[0], endDate: end.toISOString().split('T')[0] };
 }
 
+export function getDateRangePST(days, offsetDays = 0) {
+  const pstNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const end = new Date(pstNow.getTime() - offsetDays * 24 * 60 * 60 * 1000);
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+  const fmt = d => d.toISOString().split('T')[0];
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
 export function formatBytes(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
