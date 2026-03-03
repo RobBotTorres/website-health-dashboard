@@ -752,11 +752,18 @@ export async function auditSinglePageWithLinks(url, domain) {
       a11yIssues.push({ type: 'empty_links', count: emptyLinkMatches.length, severity: 'medium', snippets: emptyLinkSnippets });
     }
 
-    const inputMatches = html.match(/<input[^>]*type=["'](text|email|password|tel|number|search)["'][^>]*>/gi) || [];
+    const hiddenTypes = /type=["']?(hidden|submit|button|reset|image)["']?/i;
+    const allInputs = html.match(/<input\b[^>]*>/gi) || [];
+    const inputMatches = allInputs.filter(tag => !hiddenTypes.test(tag));
     const labels = (html.match(/<label[^>]*>/gi) || []).length;
-    if (inputMatches.length > labels) {
-      const missingLabelSnippets = inputMatches.slice(0, 5).map(s => s.length > 500 ? s.substring(0, 500) + '...' : s);
-      a11yIssues.push({ type: 'missing_labels', count: inputMatches.length - labels, severity: 'high', snippets: missingLabelSnippets });
+    const ariaLabelledInputs = inputMatches.filter(tag => /aria-label/i.test(tag) || /aria-labelledby/i.test(tag)).length;
+    const unlabelled = inputMatches.length - labels - ariaLabelledInputs;
+    if (unlabelled > 0) {
+      const missingLabelSnippets = inputMatches
+        .filter(tag => !/aria-label/i.test(tag) && !/aria-labelledby/i.test(tag))
+        .slice(0, 5)
+        .map(s => s.length > 500 ? s.substring(0, 500) + '...' : s);
+      a11yIssues.push({ type: 'missing_labels', count: unlabelled, severity: 'high', snippets: missingLabelSnippets });
     }
 
     if (!html.match(/skip[- ]?(to[- ]?)?(main|content|nav)/i)) {
