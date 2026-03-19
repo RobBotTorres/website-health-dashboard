@@ -1,12 +1,22 @@
-name = "wine-health-dashboard"
+name = "website-health-dashboard"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Import .html files as text modules
 [[rules]]
 type = "Text"
 globs = ["**/*.html"]
 fallthrough = false
+
+# Custom domains
+[[routes]]
+pattern = "shelobweb.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.shelobweb.com"
+custom_domain = true
 
 # Cron trigger - runs daily at 3am PST (11am UTC)
 [triggers]
@@ -57,13 +67,13 @@ VIANSA_GSC_PROPERTIES = "sc-domain:viansa.com"
 # KV Namespace for storing SEO audit results
 [[kv_namespaces]]
 binding = "SEO_AUDITS"
-id = "9678ee508f874492887d0b25ba89bbc5"
+id = "1d35ef3fe7034018aa29af8a5ac00064"
 
 # D1 Database for audit history and tracking
 [[d1_databases]]
 binding = "DB"
 database_name = "wine-seo-audits"
-database_id = "c48022d2-100a-4d3d-9315-9da87c6c06a6"
+database_id = "7e354146-aefa-4c76-bab9-50fa1eb88e53"
 
 [vars]
 # Property Zone IDs
@@ -82,8 +92,20 @@ GIRARD_GSC_PROPERTIES = "sc-domain:girardwinery.com"
 KUNDE_GSC_PROPERTIES = "sc-domain:kunde.com"
 VIANSA_GSC_PROPERTIES = "sc-domain:viansa.com"
 
+# Stripe Price IDs (set after creating products in Stripe Dashboard)
+# STRIPE_PRO_PRICE_ID    = "price_xxx"  — Pro plan $19/mo
+# STRIPE_AGENCY_PRICE_ID = "price_xxx"  — Agency plan $49/mo
+
 # Secrets (add via: wrangler secret put <NAME>)
-# CLOUDFLARE_API_TOKEN
-# GOOGLE_SERVICE_ACCOUNT
-# PAGESPEED_API_KEY
-# AUTH_TOKEN (for admin endpoint protection)
+# CLOUDFLARE_API_TOKEN    - For Cloudflare API access
+# GOOGLE_SERVICE_ACCOUNT  - Google service account JSON (legacy)
+# PAGESPEED_API_KEY       - PageSpeed Insights API key
+# AUTH_TOKEN              - Legacy admin endpoint protection
+# BREVO_API_KEY           - Brevo email API key (magic link auth)
+# ENCRYPTION_KEY          - For encrypting stored OAuth tokens (32-byte hex)
+# STRIPE_SECRET_KEY       - Stripe secret key
+# STRIPE_WEBHOOK_SECRET   - Stripe webhook signing secret
+# STRIPE_PRO_PRICE_ID    - Stripe Price ID for Pro plan
+# STRIPE_AGENCY_PRICE_ID - Stripe Price ID for Agency plan
+# GOOGLE_OAUTH_CLIENT_ID  - Google OAuth client ID
+# GOOGLE_OAUTH_CLIENT_SECRET - Google OAuth client secret

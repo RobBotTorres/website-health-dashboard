@@ -1,5 +1,5 @@
 {
-  "name": "wine-health-dashboard",
+  "name": "website-health-dashboard",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "wrangler": "^3.99.0"
+  },
+  "dependencies": {
+    "jose": "^6.2.0"
   }
 }

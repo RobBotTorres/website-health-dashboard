@@ -1,11 +1,57 @@
 import { getPropertyIdForDomain, getCredentials } from './config.js';
+import { getUserProperties, getPropertyCredentials } from './tenant.js';
 import { fetchPageSpeedInsights, fetchAndStoreSearchConsole } from './google-api.js';
 import { fetchCloudflareTraffic } from './cloudflare-api.js';
 import { fetchGA4Analytics } from './google-api.js';
 import { getDateRangePST } from './utils.js';
 
-// Run full SEO audit for all properties
+// Run full SEO audit for all properties (multi-tenant aware)
 export async function runScheduledAudit(env) {
+  // Multi-tenant: query all active properties from DB
+  if (env.DB) {
+    try {
+      const { results: allProperties } = await env.DB.prepare(`
+        SELECT p.*, u.plan, u.trial_ends_at, u.stripe_subscription_id
+        FROM properties p
+        JOIN users u ON p.user_id = u.id
+        WHERE u.plan IN ('trial', 'pro', 'agency')
+      `).all();
+
+      if (allProperties && allProperties.length > 0) {
+        // Filter out expired trials
+        const today = new Date().toISOString().split('T')[0];
+        const activeProperties = allProperties.filter(p => {
+          if (p.plan === 'trial' && p.trial_ends_at && p.trial_ends_at < today) return false;
+          return true;
+        });
+
+        console.log(`Starting scheduled SEO audit for ${activeProperties.length} properties (${allProperties.length} total, ${allProperties.length - activeProperties.length} expired)`);
+
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < activeProperties.length; i += BATCH_SIZE) {
+          const batch = activeProperties.slice(i, i + BATCH_SIZE);
+          await Promise.allSettled(
+            batch.map(async (prop) => {
+              try {
+                console.log(`Auditing ${prop.domain} (user: ${prop.user_id})...`);
+                await runFullSitemapAudit(prop.domain, env, prop.user_id);
+                console.log(`Completed ${prop.domain}`);
+              } catch (error) {
+                console.error(`Error auditing ${prop.domain}:`, error.message);
+              }
+            })
+          );
+        }
+
+        console.log('Scheduled tasks complete (multi-tenant)');
+        return;
+      }
+    } catch (e) {
+      console.error('Failed to load properties from DB, falling back to legacy:', e.message);
+    }
+  }
+
+  // Legacy fallback: hardcoded domains
   const domains = [
     'adairfamilywines.com',
     'brcohn.com',
@@ -15,7 +61,7 @@ export async function runScheduledAudit(env) {
     'viansa.com'
   ];
 
-  console.log(`Starting scheduled SEO audit for ${domains.length} domains`);
+  console.log(`Starting scheduled SEO audit for ${domains.length} domains (legacy mode)`);
 
   for (const domain of domains) {
     try {
@@ -30,21 +76,36 @@ export async function runScheduledAudit(env) {
   console.log('Scheduled tasks complete');
 }
 
-// Collect performance data for all domains
+// Collect performance data for all domains (multi-tenant aware)
 export async function collectPerformanceSnapshot(env) {
   if (!env.DB || !env.PAGESPEED_API_KEY) {
     console.log('Performance collection skipped - missing DB or API key');
     return;
   }
 
-  const domains = [
-    'viansa.com',
-    'kunde.com',
-    'brcohn.com',
-    'clospegase.com',
-    'girardwinery.com',
-    'adairfamilywines.com'
-  ];
+  // Multi-tenant: get all active properties from DB
+  let domains = [];
+  try {
+    const { results: allProperties } = await env.DB.prepare(`
+      SELECT p.domain, p.user_id FROM properties p
+      JOIN users u ON p.user_id = u.id
+      WHERE u.plan IN ('trial', 'pro', 'agency')
+    `).all();
+
+    if (allProperties && allProperties.length > 0) {
+      domains = allProperties.map(p => ({ domain: p.domain, userId: p.user_id }));
+    }
+  } catch (e) {
+    console.error('Failed to load properties from DB:', e.message);
+  }
+
+  // Legacy fallback
+  if (domains.length === 0) {
+    domains = [
+      'viansa.com', 'kunde.com', 'brcohn.com',
+      'clospegase.com', 'girardwinery.com', 'adairfamilywines.com'
+    ].map(d => ({ domain: d, userId: null }));
+  }
 
   const { endDate: today } = getDateRangePST(0);
   const now = new Date().toISOString();
@@ -53,22 +114,24 @@ export async function collectPerformanceSnapshot(env) {
   for (let i = 0; i < domains.length; i += PARALLEL) {
     const batch = domains.slice(i, i + PARALLEL);
     const results = await Promise.allSettled(
-      batch.map(domain => fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).then(cwv => ({ domain, cwv })))
+      batch.map(({ domain }) => fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).then(cwv => ({ domain, cwv })))
     );
 
     const stmts = [];
-    for (const result of results) {
+    for (let j = 0; j < results.length; j++) {
+      const result = results[j];
       if (result.status !== 'fulfilled') continue;
       const { domain, cwv } = result.value;
       if (!cwv || cwv.error) continue;
+      const userId = batch[j]?.userId || null;
 
       stmts.push(env.DB.prepare(`
-        INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(domain, date) DO UPDATE SET
           lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
           inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
-      `).bind(domain, today, cwv.LCP || null, cwv.FCP || null, cwv.CLS || null, cwv.INP || null, cwv.TTFB || null, now));
+      `).bind(domain, today, cwv.LCP || null, cwv.FCP || null, cwv.CLS || null, cwv.INP || null, cwv.TTFB || null, now, userId));
 
       console.log(`Stored performance for ${domain}: LCP=${cwv.LCP}ms`);
     }
@@ -80,7 +143,7 @@ export async function collectPerformanceSnapshot(env) {
 }
 
 // Full sitemap audit - crawls ALL pages and stores in D1
-export async function runFullSitemapAudit(domain, env) {
+export async function runFullSitemapAudit(domain, env, userId = null) {
   const startTime = Date.now();
   const { endDate: today } = getDateRangePST(0);
 
@@ -105,18 +168,32 @@ export async function runFullSitemapAudit(domain, env) {
   };
 
   try {
-    let sitemapUrl = `https://www.${domain}/sitemap.xml`;
-    try {
-      const robotsResponse = await fetch(`https://www.${domain}/robots.txt`);
-      if (robotsResponse.ok) {
-        const robotsText = await robotsResponse.text();
-        const sitemapMatch = robotsText.match(/sitemap:\s*(https?:\/\/[^\s]+)/i);
-        if (sitemapMatch) {
-          sitemapUrl = sitemapMatch[1];
+    let sitemapUrl = `https://${domain}/sitemap.xml`;
+    // Try non-www first (most common), then www
+    const robotsUrls = [
+      `https://${domain}/robots.txt`,
+      `https://www.${domain}/robots.txt`
+    ];
+    let foundRobots = false;
+    for (const robotsUrl of robotsUrls) {
+      try {
+        const robotsResponse = await fetch(robotsUrl, { redirect: 'follow' });
+        if (robotsResponse.ok) {
+          const robotsText = await robotsResponse.text();
+          const sitemapMatch = robotsText.match(/sitemap:\s*(https?:\/\/[^\s]+)/i);
+          if (sitemapMatch) {
+            sitemapUrl = sitemapMatch[1];
+          }
+          foundRobots = true;
+          console.log(`Found robots.txt at ${robotsUrl}, sitemap: ${sitemapUrl}`);
+          break;
         }
+      } catch (e) {
+        // Try next URL
       }
-    } catch (e) {
-      console.log(`Could not fetch robots.txt for ${domain}, using default sitemap URL`);
+    }
+    if (!foundRobots) {
+      console.log(`Could not fetch robots.txt for ${domain}, using default sitemap URL: ${sitemapUrl}`);
     }
 
     audit.sitemapUrl = sitemapUrl;
@@ -224,7 +301,7 @@ export async function runFullSitemapAudit(domain, env) {
   if (env.DB) {
     try {
       console.log(`Storing audit in D1 for ${domain}...`);
-      await storeAuditInD1(env.DB, domain, today, audit);
+      await storeAuditInD1(env.DB, domain, today, audit, userId);
       console.log(`SUCCESS: Stored audit for ${domain} in D1 (${audit.audited} pages)`);
     } catch (e) {
       console.error(`FAILED to store audit in D1: ${e.message}`);
@@ -234,11 +311,13 @@ export async function runFullSitemapAudit(domain, env) {
 
     // Fetch and store Search Console data
     try {
-      const propertyId = getPropertyIdForDomain(domain);
-      if (propertyId) {
+      const legacyPropertyId = getPropertyIdForDomain(domain);
+      if (legacyPropertyId) {
+        // Legacy hardcoded properties
         console.log(`Fetching Search Console data for ${domain}...`);
-        await fetchAndStoreSearchConsole(env, domain, propertyId, today);
+        await fetchAndStoreSearchConsole(env, domain, legacyPropertyId, today, userId);
       }
+      // Note: SaaS users' Search Console data is fetched via OAuth in the handlers
     } catch (e) {
       console.error(`Failed Search Console for ${domain}: ${e.message}`);
     }
@@ -250,8 +329,8 @@ export async function runFullSitemapAudit(domain, env) {
         const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
         if (cwv && !cwv.error) {
           await env.DB.prepare(`
-            INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(domain, date) DO UPDATE SET
               lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
               inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
@@ -259,7 +338,8 @@ export async function runFullSitemapAudit(domain, env) {
             domain, today,
             cwv.LCP || null, cwv.FCP || null, cwv.CLS || null,
             cwv.INP || null, cwv.TTFB || null,
-            new Date().toISOString()
+            new Date().toISOString(),
+            userId
           ).run();
           console.log(`Stored performance history for ${domain}: LCP=${cwv.LCP}ms`);
         }
@@ -269,11 +349,42 @@ export async function runFullSitemapAudit(domain, env) {
     }
 
     // Fetch and store full performance snapshot
+    // Try legacy config first, then look up the DB property for SaaS users
     try {
-      const propertyId = getPropertyIdForDomain(domain);
-      if (propertyId) {
-        console.log(`Storing performance snapshot for ${domain}...`);
-        await fetchAndStorePerformance(env, domain, propertyId, today);
+      const legacyPropertyId = getPropertyIdForDomain(domain);
+      if (legacyPropertyId) {
+        console.log(`Storing performance snapshot for ${domain} (legacy)...`);
+        await fetchAndStorePerformance(env, domain, legacyPropertyId, today, userId);
+      } else {
+        // SaaS user — look up property from DB and store snapshot directly
+        console.log(`Storing performance snapshot for ${domain} (SaaS)...`);
+        const dbProperty = await env.DB.prepare(
+          'SELECT id FROM properties WHERE domain = ? AND user_id = ?'
+        ).bind(domain, userId).first();
+        if (dbProperty) {
+          await fetchAndStorePerformance(env, domain, dbProperty.id, today, userId);
+        } else {
+          // No specific property found, store basic CWV snapshot
+          console.log(`Storing basic CWV snapshot for ${domain}...`);
+          if (env.PAGESPEED_API_KEY) {
+            const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+            if (cwv && !cwv.error) {
+              await env.DB.prepare(`
+                INSERT OR REPLACE INTO performance_snapshots (
+                  domain, snapshot_date, user_id,
+                  cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
+                  cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(
+                domain, today, userId,
+                cwv.LCP || null, cwv.lcpRating || null, cwv.INP || null, cwv.inpRating || null,
+                cwv.CLS ?? null, cwv.clsRating || null, cwv.FCP || null, cwv.fcpRating || null,
+                cwv.TTFB || null, cwv.overallCategory || null
+              ).run();
+              console.log(`Stored basic CWV snapshot for ${domain}`);
+            }
+          }
+        }
       }
     } catch (e) {
       console.error(`Failed performance snapshot for ${domain}: ${e.message}`);
@@ -283,9 +394,10 @@ export async function runFullSitemapAudit(domain, env) {
     audit.d1Error = 'D1 not configured';
   }
 
-  // Also cache in KV for fast reads
+  // Also cache in KV for fast reads (tenant-aware key)
   if (env.SEO_AUDITS) {
-    await env.SEO_AUDITS.put(`audit:${domain}`, JSON.stringify(audit), {
+    const cacheKey = userId ? `audit:${userId}:${domain}` : `audit:${domain}`;
+    await env.SEO_AUDITS.put(cacheKey, JSON.stringify(audit), {
       expirationTtl: 48 * 60 * 60
     });
   }
@@ -294,17 +406,17 @@ export async function runFullSitemapAudit(domain, env) {
 }
 
 // Store audit results in D1 with change tracking
-export async function storeAuditInD1(db, domain, auditDate, audit) {
-  console.log(`storeAuditInD1: Starting for ${domain} on ${auditDate}`);
+export async function storeAuditInD1(db, domain, auditDate, audit, userId = null) {
+  console.log(`storeAuditInD1: Starting for ${domain} on ${auditDate} (user: ${userId || 'legacy'})`);
 
   const auditResult = await db.prepare(`
-    INSERT INTO audits (domain, audit_date, total_pages, pages_audited, duration_seconds)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO audits (domain, audit_date, total_pages, pages_audited, duration_seconds, user_id)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(domain, audit_date) DO UPDATE SET
       total_pages = excluded.total_pages,
       pages_audited = excluded.pages_audited,
       duration_seconds = excluded.duration_seconds
-  `).bind(domain, auditDate, audit.totalUrls, audit.audited, audit.duration).run();
+  `).bind(domain, auditDate, audit.totalUrls, audit.audited, audit.duration, userId).run();
   console.log(`storeAuditInD1: Audit record inserted, changes: ${auditResult.meta?.changes}`);
 
   const currentIssues = new Map();
@@ -451,16 +563,26 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
   for (let i = 0; i < issueEntries.length; i += BATCH_SIZE) {
     const batch = issueEntries.slice(i, i + BATCH_SIZE);
     const stmts = batch.map(([key, issue]) => {
+      // If a manually-fixed issue is found again by the crawl, set reactivated_at
+      // instead of clearing fixed_at — this preserves the manual completion state
+      // and triggers a reactivation alert in the dashboard.
       return db.prepare(`
-        INSERT INTO issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
           severity = excluded.severity,
           page_url = excluded.page_url,
           details = excluded.details,
           last_seen = excluded.last_seen,
-          fixed_at = NULL
-      `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate);
+          fixed_at = CASE
+            WHEN issues.manually_fixed_at IS NOT NULL THEN issues.fixed_at
+            ELSE NULL
+          END,
+          reactivated_at = CASE
+            WHEN issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
+            ELSE issues.reactivated_at
+          END
+      `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate, userId);
     });
 
     await db.batch(stmts);
@@ -469,10 +591,10 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
 
   console.log(`storeAuditInD1: Upserted ${upserted} issues`);
 
-  // Mark fixed issues
+  // Mark fixed issues — skip manually-fixed issues (they have their own lifecycle)
   const allUnfixed = await db.prepare(`
-    SELECT id, issue_type, page_path FROM issues
-    WHERE domain = ? AND fixed_at IS NULL
+    SELECT id, issue_type, page_path, manually_fixed_at FROM issues
+    WHERE domain = ? AND fixed_at IS NULL AND manually_fixed_at IS NULL
   `).bind(domain).all();
 
   const toFix = (allUnfixed.results || []).filter(existing => {
@@ -490,6 +612,28 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
     }
   }
 
+  // Also verify manually-fixed issues that are no longer found in crawl — mark as "verified fixed"
+  const manuallyFixedUnverified = await db.prepare(`
+    SELECT id, issue_type, page_path FROM issues
+    WHERE domain = ? AND manually_fixed_at IS NOT NULL AND reactivated_at IS NOT NULL
+  `).bind(domain).all();
+
+  const verifiedFixes = (manuallyFixedUnverified.results || []).filter(existing => {
+    const key = `${existing.issue_type}|${existing.page_path}`;
+    return !currentIssues.has(key);
+  });
+
+  if (verifiedFixes.length > 0) {
+    for (let i = 0; i < verifiedFixes.length; i += BATCH_SIZE) {
+      const batch = verifiedFixes.slice(i, i + BATCH_SIZE);
+      const stmts = batch.map(existing => {
+        return db.prepare(`UPDATE issues SET reactivated_at = NULL, fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id);
+      });
+      await db.batch(stmts);
+    }
+    console.log(`storeAuditInD1: Verified ${verifiedFixes.length} manually-fixed issues are now truly fixed`);
+  }
+
   console.log(`storeAuditInD1: Marked ${toFix.length} issues as fixed`);
 
   // Handle broken links
@@ -502,13 +646,13 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
         try {
           const linkPath = new URL(broken.url).pathname;
           stmts.push(db.prepare(`
-            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(domain, link_path) DO UPDATE SET
               status_code = excluded.status_code,
               last_seen = excluded.last_seen,
               fixed_at = NULL
-          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate));
+          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate, userId));
         } catch (e) {
           // skip invalid URLs
         }
@@ -540,15 +684,22 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
       const snippetsJson = issue.snippets ? JSON.stringify(issue.snippets) : null;
 
       a11yStmts.push(db.prepare(`
-        INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
           severity = excluded.severity,
           issue_count = excluded.issue_count,
           snippets = excluded.snippets,
           last_seen = excluded.last_seen,
-          fixed_at = NULL
-      `).bind(domain, issue.type, issue.severity, path, url, issue.count, snippetsJson, auditDate, auditDate));
+          fixed_at = CASE
+            WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN accessibility_issues.fixed_at
+            ELSE NULL
+          END,
+          reactivated_at = CASE
+            WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
+            ELSE accessibility_issues.reactivated_at
+          END
+      `).bind(domain, issue.type, issue.severity, path, url, issue.count, snippetsJson, auditDate, auditDate, userId));
     }
   }
 
@@ -559,9 +710,16 @@ export async function storeAuditInD1(db, domain, auditDate, audit) {
 
   console.log(`storeAuditInD1: Upserted ${a11yStmts.length} accessibility issues`);
 
+  // Mark a11y issues as fixed — skip manually-fixed ones
   await db.prepare(`
     UPDATE accessibility_issues SET fixed_at = ?
-    WHERE domain = ? AND fixed_at IS NULL AND last_seen < ?
+    WHERE domain = ? AND fixed_at IS NULL AND manually_fixed_at IS NULL AND last_seen < ?
+  `).bind(auditDate, domain, auditDate).run();
+
+  // Verify manually-fixed a11y issues that are no longer found
+  await db.prepare(`
+    UPDATE accessibility_issues SET reactivated_at = NULL, fixed_at = ?
+    WHERE domain = ? AND manually_fixed_at IS NOT NULL AND reactivated_at IS NOT NULL AND last_seen < ?
   `).bind(auditDate, domain, auditDate).run();
 
   console.log(`storeAuditInD1: Complete for ${domain}`);
@@ -983,10 +1141,12 @@ export async function getAllSitemapUrls(sitemapUrl) {
 
   if (!xml) {
     const domain = new URL(sitemapUrl).hostname;
+    const nonWww = domain.replace('www.', '');
     const fallbacks = [
-      `https://${domain}/sitemap.xml`,
-      `https://${domain}/sitemap_index.xml`,
-      `https://www.${domain.replace('www.', '')}/sitemap.xml`
+      `https://${nonWww}/sitemap.xml`,
+      `https://www.${nonWww}/sitemap.xml`,
+      `https://${nonWww}/sitemap_index.xml`,
+      `https://www.${nonWww}/sitemap_index.xml`
     ];
 
     for (const fallback of fallbacks) {
@@ -1263,11 +1423,27 @@ export async function fetchSiteHealth(domain) {
 }
 
 // Fetch and store performance data in D1
-export async function fetchAndStorePerformance(env, domain, propertyId, dataDate) {
+export async function fetchAndStorePerformance(env, domain, propertyId, dataDate, userId = null) {
   if (!env.DB) return;
 
   try {
-    const creds = getCredentials(propertyId, env);
+    // Try DB-based credentials first for multi-tenant, fall back to config.js
+    let creds;
+    if (env.DB && userId) {
+      try {
+        const property = await env.DB.prepare(
+          'SELECT * FROM properties WHERE id = ? AND user_id = ?'
+        ).bind(propertyId, userId).first();
+        if (property) {
+          creds = getPropertyCredentials(property, env);
+        }
+      } catch (e) {
+        // Fall through to legacy
+      }
+    }
+    if (!creds) {
+      creds = getCredentials(propertyId, env);
+    }
 
     const [cloudflare, cwv, ga4] = await Promise.all([
       fetchCloudflareTraffic(creds.cloudflare, env).catch(e => ({ error: e.message })),
@@ -1279,16 +1455,16 @@ export async function fetchAndStorePerformance(env, domain, propertyId, dataDate
 
     await env.DB.prepare(`
       INSERT OR REPLACE INTO performance_snapshots (
-        domain, snapshot_date,
+        domain, snapshot_date, user_id,
         cf_requests, cf_requests_change, cf_bandwidth, cf_cache_ratio, cf_error_rate, cf_threats,
         cf_2xx, cf_3xx, cf_4xx, cf_5xx,
         cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
         cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall,
         ga4_sessions, ga4_sessions_change, ga4_users, ga4_users_change,
         ga4_bounce_rate, ga4_avg_duration, ga4_engagement_rate, ga4_page_views, ga4_top_pages
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      domain, dataDate,
+      domain, dataDate, userId,
       cloudflare.requests || 0,
       parseFloat(cloudflare.requestsChange) || 0,
       cloudflare.bandwidth || '0 B',

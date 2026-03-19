@@ -2,13 +2,26 @@ import { getGoogleAccessToken } from './google-auth.js';
 import { getDateRange, formatDuration } from './utils.js';
 import { getCredentials } from './config.js';
 
+/**
+ * Get an access token from credentials — handles both OAuth and service account paths.
+ * @param {object} creds - credentials object with { credentials, useOAuth, env }
+ * @returns {Promise<string>} access token
+ */
+async function getAccessToken(creds) {
+  return getGoogleAccessToken(creds.credentials, {
+    useOAuth: creds.useOAuth,
+    encryptedRefreshToken: creds.useOAuth ? creds.credentials : undefined,
+    env: creds.env
+  });
+}
+
 export async function fetchGA4Analytics(creds) {
   if (!creds.propertyId || !creds.credentials) {
     return { error: 'GA4 not configured' };
   }
 
   try {
-    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const accessToken = await getAccessToken(creds);
     const propertyId = creds.propertyId;
 
     const response = await fetch(
@@ -114,7 +127,7 @@ export async function fetchGA4Performance(creds) {
   }
 
   try {
-    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const accessToken = await getAccessToken(creds);
     const propertyId = creds.propertyId;
 
     const response = await fetch(
@@ -188,7 +201,7 @@ export async function fetchSearchConsoleSummary(creds) {
   }
 
   try {
-    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const accessToken = await getAccessToken(creds);
     const { startDate, endDate } = getDateRange(7);
 
     let totalClicks = 0, totalImpressions = 0, weightedPosition = 0, positionWeight = 0;
@@ -237,7 +250,7 @@ export async function fetchSearchConsoleDetail(creds) {
   if (summary.error) return summary;
 
   try {
-    const accessToken = await getGoogleAccessToken(creds.credentials);
+    const accessToken = await getAccessToken(creds);
     const { startDate, endDate } = getDateRange(7);
     const { startDate: prevStartDate, endDate: prevEndDate } = getDateRange(7, 7);
 
@@ -425,7 +438,7 @@ export async function fetchAndStoreSearchConsole(env, domain, propertyId, dataDa
       return;
     }
 
-    const accessToken = await getGoogleAccessToken(creds.searchConsole.credentials);
+    const accessToken = await getAccessToken(creds.searchConsole);
     const { startDate, endDate } = getDateRange(28);
     const { startDate: prevStartDate, endDate: prevEndDate } = getDateRange(28, 28);
 
@@ -503,7 +516,7 @@ export async function fetchPageSpeedInsights(domain, apiKey) {
 
   for (const testDomain of domainsToTry) {
     try {
-      let url = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https://${testDomain}&strategy=mobile&category=performance`;
+      let url = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https://${testDomain}&strategy=mobile&category=performance&category=accessibility`;
       if (apiKey) {
         url += `&key=${apiKey}`;
       }
@@ -526,40 +539,186 @@ export async function fetchPageSpeedInsights(domain, apiKey) {
       const originCrux = data.originLoadingExperience?.metrics || {};
 
       const metrics = Object.keys(originCrux).length > 0 ? originCrux : crux;
+      const hasCrux = Object.keys(metrics).length > 0;
 
-      if (Object.keys(metrics).length === 0) {
-        console.log(`No CrUX data for ${testDomain}, trying next...`);
-        continue;
+      // Extract Lighthouse accessibility data (available in both CrUX and non-CrUX paths)
+      const a11yData = parseLighthouseAccessibility(data);
+
+      // Try CrUX real-user data first
+      if (hasCrux) {
+        return {
+          LCP: metrics.LARGEST_CONTENTFUL_PAINT_MS?.percentile || null,
+          INP: metrics.INTERACTION_TO_NEXT_PAINT?.percentile || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.percentile || null,
+          CLS: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.percentile ? metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile / 100 : null,
+          FCP: metrics.FIRST_CONTENTFUL_PAINT_MS?.percentile || null,
+          TTFB: metrics.EXPERIMENTAL_TIME_TO_FIRST_BYTE?.percentile || null,
+          FID: metrics.FIRST_INPUT_DELAY_MS?.percentile || null,
+          lcpRating: metrics.LARGEST_CONTENTFUL_PAINT_MS?.category || null,
+          inpRating: metrics.INTERACTION_TO_NEXT_PAINT?.category || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.category || null,
+          clsRating: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.category || null,
+          fcpRating: metrics.FIRST_CONTENTFUL_PAINT_MS?.category || null,
+          overallCategory: data.loadingExperience?.overall_category || data.originLoadingExperience?.overall_category || null,
+          source: Object.keys(originCrux).length > 0 ? 'origin' : 'url',
+          testedDomain: testDomain,
+          accessibility: a11yData
+        };
       }
 
-      const result = {
-        LCP: metrics.LARGEST_CONTENTFUL_PAINT_MS?.percentile || null,
-        INP: metrics.INTERACTION_TO_NEXT_PAINT?.percentile || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.percentile || null,
-        CLS: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.percentile ? metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile / 100 : null,
-        FCP: metrics.FIRST_CONTENTFUL_PAINT_MS?.percentile || null,
-        TTFB: metrics.EXPERIMENTAL_TIME_TO_FIRST_BYTE?.percentile || null,
-        FID: metrics.FIRST_INPUT_DELAY_MS?.percentile || null,
+      // Fall back to Lighthouse lab data (always available)
+      const lhr = data.lighthouseResult;
+      if (lhr) {
+        const audits = lhr.audits || {};
+        const perfScore = lhr.categories?.performance?.score;
+        const lcpMs = audits['largest-contentful-paint']?.numericValue;
+        const fcpMs = audits['first-contentful-paint']?.numericValue;
+        const clsVal = audits['cumulative-layout-shift']?.numericValue;
+        const tbtMs = audits['total-blocking-time']?.numericValue;
+        const siMs = audits['speed-index']?.numericValue;
+        const ttfbMs = audits['server-response-time']?.numericValue;
 
-        lcpRating: metrics.LARGEST_CONTENTFUL_PAINT_MS?.category || null,
-        inpRating: metrics.INTERACTION_TO_NEXT_PAINT?.category || metrics.EXPERIMENTAL_INTERACTION_TO_NEXT_PAINT?.category || null,
-        clsRating: metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE?.category || null,
-        fcpRating: metrics.FIRST_CONTENTFUL_PAINT_MS?.category || null,
+        function labRating(audit) {
+          if (!audit) return null;
+          const score = audit.score;
+          if (score === null || score === undefined) return null;
+          if (score >= 0.9) return 'GOOD';
+          if (score >= 0.5) return 'NEEDS_IMPROVEMENT';
+          return 'POOR';
+        }
 
-        overallCategory: data.loadingExperience?.overall_category || data.originLoadingExperience?.overall_category || null,
+        const overallCat = perfScore >= 0.9 ? 'GOOD' : perfScore >= 0.5 ? 'NEEDS_IMPROVEMENT' : 'POOR';
 
-        source: Object.keys(originCrux).length > 0 ? 'origin' : 'url',
-        testedDomain: testDomain
-      };
+        return {
+          LCP: lcpMs ? Math.round(lcpMs) : null,
+          INP: tbtMs ? Math.round(tbtMs) : null,
+          CLS: clsVal !== undefined ? clsVal : null,
+          FCP: fcpMs ? Math.round(fcpMs) : null,
+          TTFB: ttfbMs ? Math.round(ttfbMs) : null,
+          FID: null,
+          lcpRating: labRating(audits['largest-contentful-paint']),
+          inpRating: labRating(audits['total-blocking-time']),
+          clsRating: labRating(audits['cumulative-layout-shift']),
+          fcpRating: labRating(audits['first-contentful-paint']),
+          ttfbRating: labRating(audits['server-response-time']),
+          overallCategory: overallCat,
+          performanceScore: perfScore ? Math.round(perfScore * 100) : null,
+          speedIndex: siMs ? Math.round(siMs) : null,
+          source: 'lighthouse',
+          testedDomain: testDomain,
+          accessibility: a11yData
+        };
+      }
 
-      return result;
+      console.log(`No CrUX or Lighthouse data for ${testDomain}, trying next...`);
+      continue;
     } catch (error) {
       console.error(`PageSpeed fetch error for ${testDomain}:`, error);
       continue;
     }
   }
 
-  return { note: 'No CrUX data available (needs more Chrome traffic)' };
+  return { note: 'Could not reach site for performance analysis' };
 }
+
+/**
+ * Parse Lighthouse accessibility audit results from a PageSpeed Insights response.
+ * Extracts failing audits with their details, scores, and affected elements.
+ *
+ * @param {object} data - Full PSI API response
+ * @returns {object} { score, failingAudits[], passingCount, manualCount }
+ */
+function parseLighthouseAccessibility(data) {
+  const lhr = data?.lighthouseResult;
+  if (!lhr) return null;
+
+  const a11yCat = lhr.categories?.accessibility;
+  if (!a11yCat) return null;
+
+  const score = a11yCat.score !== null && a11yCat.score !== undefined
+    ? Math.round(a11yCat.score * 100)
+    : null;
+
+  const audits = lhr.audits || {};
+  const auditRefs = a11yCat.auditRefs || [];
+
+  const failingAudits = [];
+  let passingCount = 0;
+  let manualCount = 0;
+  let notApplicableCount = 0;
+
+  // Group IDs for human-readable categories
+  const groupLabels = {
+    'a11y-aria': 'ARIA',
+    'a11y-color-contrast': 'Color Contrast',
+    'a11y-names-labels': 'Names & Labels',
+    'a11y-navigation': 'Navigation',
+    'a11y-language': 'Language',
+    'a11y-audio-video': 'Audio & Video',
+    'a11y-tables-lists': 'Tables & Lists',
+    'a11y-best-practices': 'Best Practices'
+  };
+
+  for (const ref of auditRefs) {
+    const audit = audits[ref.id];
+    if (!audit) continue;
+
+    // Skip informative/manual audits
+    if (audit.scoreDisplayMode === 'manual' || audit.scoreDisplayMode === 'informative') {
+      manualCount++;
+      continue;
+    }
+
+    if (audit.scoreDisplayMode === 'notApplicable' || audit.score === null) {
+      notApplicableCount++;
+      continue;
+    }
+
+    // Passing audit
+    if (audit.score === 1) {
+      passingCount++;
+      continue;
+    }
+
+    // Failing audit — extract details
+    const items = audit.details?.items || [];
+    const elements = items.slice(0, 10).map(item => {
+      const node = item.node || {};
+      return {
+        selector: node.selector || null,
+        snippet: node.snippet || null,
+        nodeLabel: node.nodeLabel || null,
+        explanation: node.explanation || null
+      };
+    }).filter(el => el.selector || el.snippet);
+
+    failingAudits.push({
+      id: ref.id,
+      title: audit.title || ref.id,
+      description: (audit.description || '').replace(/\[.*?\]\(.*?\)/g, '').trim(),
+      score: audit.score,
+      weight: ref.weight || 0,
+      group: ref.group || 'other',
+      groupLabel: groupLabels[ref.group] || 'Other',
+      severity: ref.weight >= 7 ? 'high' : ref.weight >= 3 ? 'medium' : 'low',
+      elementCount: items.length,
+      elements
+    });
+  }
+
+  // Sort by weight (most impactful first)
+  failingAudits.sort((a, b) => b.weight - a.weight);
+
+  return {
+    score,
+    failingAudits,
+    passingCount,
+    manualCount,
+    notApplicableCount,
+    totalChecks: failingAudits.length + passingCount + notApplicableCount + manualCount
+  };
+}
+
+// Export for use in handlers
+export { parseLighthouseAccessibility };
 
 export async function fetchCoreWebVitals(domain) {
   try {

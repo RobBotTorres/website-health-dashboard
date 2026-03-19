@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shelob Web — Monitor Your Website SEO, Performance & Accessibility</title>
+  <meta name="description" content="Monitor your websites' SEO, Core Web Vitals, accessibility, and broken links in one dashboard. Get instant results and daily automated audits.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='white' stroke-width='1.5' opacity='0.3'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='white' stroke-width='1.5' opacity='0.5'/%3E%3Ccircle cx='32' cy='32' r='6' fill='none' stroke='white' stroke-width='1.5' opacity='0.8'/%3E%3Cline x1='32' y1='8' x2='32' y2='56' stroke='white' stroke-width='1.5'/%3E%3Cline x1='8' y1='32' x2='56' y2='32' stroke='white' stroke-width='1.5'/%3E%3Cline x1='15' y1='15' x2='49' y2='49' stroke='white' stroke-width='1.5'/%3E%3Cline x1='49' y1='15' x2='15' y2='49' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{--bg:#0f1117;--card:#1a1d2e;--card2:#151828;--border:#2a2d3e;--blue:#6366f1;--blue-hover:#5558e6;--blue-glow:rgba(99,102,241,0.15);--green:#22c55e;--orange:#f59e0b;--red:#ef4444;--text:#e2e8f0;--text2:#94a3b8;--text3:#8191a6}
+    html{scroll-behavior:smooth;scroll-padding-top:70px;-webkit-text-size-adjust:100%}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+    a{color:var(--blue);text-decoration:none;touch-action:manipulation}
+
+    /* ========================================
+       MOBILE-FIRST BASE STYLES (< 768px)
+       ======================================== */
+
+    /* Nav */
+    nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(15,17,23,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 16px}
+    .nav-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:60px}
+    .nav-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--text);text-decoration:none;min-height:44px}
+    .nav-logo svg{width:32px;height:32px}
+    .nav-links{display:flex;align-items:center;gap:8px}
+    .nav-links a{color:var(--text2);font-size:14px;transition:color 0.2s;min-height:44px;display:inline-flex;align-items:center;padding:8px}
+    .nav-links a:hover{color:var(--text)}
+    .nav-links a:not(.btn){display:none}
+
+    /* Buttons — WCAG 2.5.8 AA: 44px min touch targets */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 24px;border-radius:8px;font-size:16px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;text-decoration:none;min-height:44px;touch-action:manipulation}
+    .btn-primary{background:var(--blue);color:#fff}
+    .btn-primary:hover{background:var(--blue-hover);transform:translateY(-1px)}
+    .btn-outline{background:transparent;color:var(--text);border:1px solid var(--border)}
+    .btn-outline:hover{border-color:var(--text3);background:var(--card)}
+
+    /* Hero — mobile base */
+    .hero{padding:100px 20px 60px;text-align:center;max-width:800px;margin:0 auto}
+    .hero-badge{display:inline-block;padding:8px 16px;border-radius:20px;background:var(--blue-glow);color:var(--blue);font-size:13px;font-weight:600;margin-bottom:20px;border:1px solid rgba(99,102,241,0.2)}
+    .hero h1{font-size:clamp(28px,6vw,52px);font-weight:800;line-height:1.15;margin-bottom:20px;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    .hero p{font-size:16px;color:var(--text2);max-width:600px;margin:0 auto 28px;line-height:1.7}
+    .hero-cta{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+    .hero-cta .btn{width:100%;justify-content:center;padding:14px 24px;font-size:16px}
+    .hero-sub{color:var(--text3);font-size:13px;margin-top:16px}
+
+    /* Sections — mobile base */
+    .section{padding:60px 20px;max-width:1100px;margin:0 auto}
+    .section-title{text-align:center;margin-bottom:36px}
+    .section-title h2{font-size:24px;font-weight:700;margin-bottom:12px}
+    .section-title p{color:var(--text2);font-size:15px;max-width:560px;margin:0 auto}
+
+    /* Features grid — single column on mobile */
+    .features-grid{display:grid;grid-template-columns:1fr;gap:16px}
+    .feature-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;transition:border-color 0.2s,transform 0.2s}
+    .feature-card:hover{border-color:var(--blue);transform:translateY(-2px)}
+    .feature-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-size:22px}
+    .feature-card h3{font-size:17px;margin-bottom:8px}
+    .feature-card p{color:var(--text2);font-size:14px;line-height:1.6}
+    .fi-seo{background:rgba(99,102,241,0.15)}
+    .fi-perf{background:rgba(34,197,94,0.15)}
+    .fi-a11y{background:rgba(245,158,11,0.15)}
+    .fi-links{background:rgba(239,68,68,0.15)}
+    .fi-gsc{background:rgba(99,102,241,0.15)}
+    .fi-cf{background:rgba(245,158,11,0.15)}
+
+    /* Steps — single column on mobile */
+    .steps{display:grid;grid-template-columns:1fr;gap:32px;margin-top:36px}
+    .step{text-align:center;position:relative}
+    .step-num{width:48px;height:48px;border-radius:50%;background:var(--blue);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+    .step h3{font-size:17px;margin-bottom:8px}
+    .step p{color:var(--text2);font-size:14px;line-height:1.6}
+
+    /* Pricing — single column on mobile */
+    #pricing{padding-top:40px}
+    .pricing-grid{display:grid;grid-template-columns:1fr;gap:20px;max-width:960px;margin:0 auto}
+    .price-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;position:relative;transition:border-color 0.2s}
+    .price-card.featured{border-color:var(--blue);box-shadow:0 0 40px rgba(99,102,241,0.1)}
+    .price-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--blue);color:#fff;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600}
+    .price-card h3{font-size:20px;margin-bottom:4px}
+    .price-card .price{font-size:36px;font-weight:800;margin:16px 0 4px}
+    .price-card .price span{font-size:16px;font-weight:400;color:var(--text2)}
+    .price-card .period{color:var(--text3);font-size:13px;margin-bottom:20px}
+    .price-card ul{list-style:none;margin-bottom:24px}
+    .price-card li{padding:8px 0;font-size:14px;color:var(--text2);display:flex;align-items:center;gap:10px}
+    .price-card li::before{content:'✓';color:var(--green);font-weight:700;font-size:14px}
+    .price-card .btn{width:100%;justify-content:center;padding:14px;min-height:48px}
+
+    /* Footer */
+    footer{border-top:1px solid var(--border);padding:40px 20px;margin-top:40px}
+    .footer-inner{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center}
+    .footer-links{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+    .footer-links a{color:var(--text3);font-size:13px;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
+    .footer-links a:hover{color:var(--text)}
+    .footer-copy{color:var(--text3);font-size:13px}
+
+    /* ========================================
+       TABLET BREAKPOINT (768px+)
+       ======================================== */
+    @media(min-width:768px){
+      nav{padding:0 24px}
+      .nav-links{gap:16px}
+      .nav-links a:not(.btn){display:inline-flex}
+
+      .hero{padding:120px 24px 70px}
+      .hero p{font-size:18px;margin-bottom:36px}
+      .hero-cta{flex-direction:row;align-items:center;justify-content:center}
+      .hero-cta .btn{width:auto}
+
+      .section{padding:80px 24px}
+      .section-title{margin-bottom:48px}
+      .section-title h2{font-size:28px}
+
+      .features-grid{grid-template-columns:repeat(2,1fr);gap:20px}
+      .feature-card{padding:28px}
+
+      .steps{grid-template-columns:repeat(3,1fr);margin-top:48px}
+
+      .pricing-grid{grid-template-columns:repeat(2,1fr)}
+      .price-card{padding:32px}
+      .price-card .price{font-size:40px}
+    }
+
+    /* ========================================
+       DESKTOP BREAKPOINT (1024px+)
+       ======================================== */
+    @media(min-width:1024px){
+      .nav-links{gap:24px}
+      .nav-links a{font-size:14px;padding:8px 4px}
+
+      .hero{padding:140px 24px 80px}
+      .section-title h2{font-size:32px}
+
+      .features-grid{grid-template-columns:repeat(3,1fr)}
+
+      .pricing-grid{grid-template-columns:repeat(3,1fr)}
+
+      footer{padding:40px 24px}
+    }
+
+    /* ========================================
+       ACCESSIBILITY & INTERACTION
+       ======================================== */
+    /* Focus-visible outlines for keyboard navigation */
+    .btn:focus-visible,.nav-links a:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
+    /* Remove hover transforms on touch devices to avoid sticky hover states */
+    @media(hover:none){
+      .feature-card:hover{transform:none}
+      .btn-primary:hover{transform:none}
+    }
+    /* Reduce motion for users who prefer it */
+    @media(prefers-reduced-motion:reduce){
+      html{scroll-behavior:auto}
+      .feature-card,.btn,.btn-primary,.price-card{transition:none}
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <svg viewBox="0 0 36 36" fill="none">
+          <rect x="2" y="2" width="32" height="32" rx="8" fill="#6366f1" opacity="0.15" stroke="#6366f1" stroke-width="1.5"/>
+          <circle cx="18" cy="18" r="12" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.3"/>
+          <circle cx="18" cy="18" r="7" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.6"/>
+          <circle cx="18" cy="18" r="2.5" fill="#6366f1"/>
+          <line x1="18" y1="5" x2="18" y2="31" stroke="#6366f1" stroke-width="1.2"/>
+          <line x1="5" y1="18" x2="31" y2="18" stroke="#6366f1" stroke-width="1.2"/>
+          <line x1="8.8" y1="8.8" x2="27.2" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
+          <line x1="27.2" y1="8.8" x2="8.8" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
+        </svg>
+        Shelob Web
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/login" class="btn btn-outline">Sign In</a>
+        <a href="/login" class="btn btn-primary">Get Started Free</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge">🕸️ We watch your web so you don't have to</div>
+    <h1>Monitor Your Website Health in One Dashboard</h1>
+    <p>Track SEO issues, Core Web Vitals, accessibility problems, and broken links across all your websites. Get instant results when you add a site, then automated daily audits.</p>
+    <div class="hero-cta">
+      <a href="/login" class="btn btn-primary">Get Started Free <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M5 12h14M12 5l7 7-7 7"/></svg></a>
+      <a href="#features" class="btn btn-outline">See Features</a>
+    </div>
+    <p class="hero-sub">14-day free trial · No credit card required · 5 websites included</p>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features">
+    <div class="section-title">
+      <h2>Everything you need to monitor site health</h2>
+      <p>Add your website and get instant insights. We check your pages daily and alert you when something breaks.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon fi-seo">🔍</div>
+        <h3>SEO Auditing</h3>
+        <p>Automatic checks for titles, meta descriptions, H1 tags, schema markup, canonicals, and Open Graph tags across every page.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-perf">⚡</div>
+        <h3>Core Web Vitals</h3>
+        <p>Track LCP, INP, CLS, FCP, and TTFB using real Chrome User Experience data. Monitor performance trends over time.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-a11y">♿</div>
+        <h3>Accessibility Checks</h3>
+        <p>Catch missing alt text, empty links, form label issues, heading hierarchy problems, and missing skip navigation.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-links">🔗</div>
+        <h3>Broken Link Detection</h3>
+        <p>Crawl your sitemap to find internal broken links. Track when they were first seen and when they get fixed.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-gsc">📊</div>
+        <h3>Search Console Integration</h3>
+        <p>Connect Google Search Console to see keyword rankings, clicks, impressions, and position changes — all in one view.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-cf">🌐</div>
+        <h3>Cloudflare Analytics</h3>
+        <p>Add your Cloudflare API token to monitor traffic, cache hit ratios, error rates, and bandwidth across your zones.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section">
+    <div class="section-title">
+      <h2>Up and running in 60 seconds</h2>
+      <p>No complex setup. No code changes. Just add your domain and start monitoring.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Add your website</h3>
+        <p>Enter your domain name. We'll instantly crawl your homepage and check for SEO, performance, and accessibility issues.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>See instant results</h3>
+        <p>Within seconds, get a complete health report: SEO score, Core Web Vitals, accessibility issues, and more.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Monitor daily</h3>
+        <p>We run full-site audits every night. Track trends, get alerts when issues appear, and celebrate when they're fixed.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="section" id="pricing">
+    <div class="section-title">
+      <h2>Simple, transparent pricing</h2>
+      <p>Start free for 14 days. Upgrade when you're ready.</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <h3>Trial</h3>
+        <div class="price">Free</div>
+        <div class="period">for 14 days</div>
+        <ul>
+          <li>Up to 5 websites</li>
+          <li>Daily automated audits</li>
+          <li>SEO, performance, accessibility checks</li>
+          <li>Google Search Console integration</li>
+          <li>Core Web Vitals tracking</li>
+        </ul>
+        <a href="/login" class="btn btn-outline">Start Free Trial</a>
+      </div>
+      <div class="price-card featured">
+        <div class="price-badge">Most Popular</div>
+        <h3>Pro</h3>
+        <div class="price">$29<span>/mo</span></div>
+        <div class="period">billed monthly</div>
+        <ul>
+          <li>Up to 5 websites</li>
+          <li>Everything in Trial</li>
+          <li>Cloudflare analytics integration</li>
+          <li>Google Analytics (GA4) data</li>
+          <li>Priority support</li>
+        </ul>
+        <a href="/login" class="btn btn-primary">Get Started</a>
+      </div>
+      <div class="price-card">
+        <h3>Agency</h3>
+        <div class="price">$59<span>/mo</span></div>
+        <div class="period">billed monthly</div>
+        <ul>
+          <li>Up to 25 websites</li>
+          <li>Everything in Pro</li>
+          <li>Multi-client management</li>
+          <li>White-label reports (coming soon)</li>
+          <li>Priority support</li>
+        </ul>
+        <a href="/login" class="btn btn-outline">Get Started</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/help">Help</a>
+        <a href="/policies">Privacy & Terms</a>
+        <a href="/login">Sign In</a>
+      </div>
+      <p class="footer-copy">&copy; 2026 Shelob Web. Built on Cloudflare Workers.</p>
+    </div>
+  </footer>
+</body>
+</html>
