@@ -227,22 +227,40 @@ async function storeQuickAuditResults(db, domain, propertyId, userId, pageAudit,
   if (pageSpeed && !pageSpeed.error) {
     try {
       await db.prepare(`
-        INSERT INTO performance_history (domain, date, lcp, fcp, cls, inp, ttfb, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(domain, date) DO UPDATE SET
-          lcp = excluded.lcp, fcp = excluded.fcp, cls = excluded.cls,
-          inp = excluded.inp, ttfb = excluded.ttfb
+          lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
+          inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
       `).bind(
         domain, auditDate,
-        pageSpeed.lcp || null,
-        pageSpeed.fcp || null,
-        pageSpeed.cls || null,
-        pageSpeed.inp || null,
-        pageSpeed.ttfb || null,
-        userId
+        pageSpeed.LCP || null, pageSpeed.FCP || null, pageSpeed.CLS || null,
+        pageSpeed.INP || null, pageSpeed.TTFB || null,
+        new Date().toISOString(), userId
       ).run();
     } catch (e) {
       console.error('Failed to store performance history:', e.message);
+    }
+
+    // Store performance snapshot with Lighthouse a11y data
+    try {
+      await db.prepare(`
+        INSERT OR REPLACE INTO performance_snapshots (
+          domain, snapshot_date, user_id,
+          cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
+          cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall, lighthouse_a11y
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        domain, auditDate, userId,
+        pageSpeed.LCP || null, pageSpeed.lcpRating || null,
+        pageSpeed.INP || null, pageSpeed.inpRating || null,
+        pageSpeed.CLS ?? null, pageSpeed.clsRating || null,
+        pageSpeed.FCP || null, pageSpeed.fcpRating || null,
+        pageSpeed.TTFB || null, pageSpeed.overallCategory || null,
+        pageSpeed.accessibility ? JSON.stringify(pageSpeed.accessibility) : null
+      ).run();
+    } catch (e) {
+      console.error('Failed to store performance snapshot:', e.message);
     }
   }
 }
