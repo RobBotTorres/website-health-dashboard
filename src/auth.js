@@ -193,10 +193,10 @@ async function upsertUser(db, email) {
     return existing.id;
   }
 
-  // Create new user with 14-day trial
+  // Create new user with 7-day trial
   const userId = crypto.randomUUID();
   const trialEnds = new Date();
-  trialEnds.setDate(trialEnds.getDate() + 14);
+  trialEnds.setDate(trialEnds.getDate() + 7);
 
   await db.prepare(
     `INSERT INTO users (id, email, plan, trial_ends_at) VALUES (?, ?, 'trial', ?)`

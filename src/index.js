@@ -92,6 +92,45 @@ function htmlResponse(html, status = 200, extraHeaders = {}) {
   });
 }
 
+/**
+ * Replace "Sign In" nav link with "Dashboard" when user is authenticated.
+ * Works by finding the Sign In button in the nav and swapping it.
+ */
+function swapNavForAuth(html, user) {
+  if (!user) return html;
+  // Replace Sign In button (primary) → Dashboard
+  html = html.replace(
+    /<a href="\/login" class="btn btn-primary">Sign In<\/a>/g,
+    '<a href="/dashboard" class="btn btn-primary">Dashboard</a>'
+  );
+  // Replace "Get Started Free" → "Go to Dashboard" on marketing page
+  html = html.replace(
+    /<a href="\/login" class="btn btn-primary">Get Started Free <svg/g,
+    '<a href="/dashboard" class="btn btn-primary">Go to Dashboard <svg'
+  );
+  // Replace outline Sign In button → Dashboard
+  html = html.replace(
+    /<a href="\/login" class="btn btn-outline">Sign In<\/a>/g,
+    '<a href="/dashboard" class="btn btn-outline">Dashboard</a>'
+  );
+  // Replace footer Sign In links
+  html = html.replace(
+    /<a href="\/login">Sign In<\/a>/g,
+    '<a href="/dashboard">Dashboard</a>'
+  );
+  // Replace hero CTA "Get Started Free" links
+  html = html.replace(
+    />Get Started Free<\/a>/g,
+    '>Go to Dashboard</a>'
+  );
+  // Replace "Start Free Trial" links
+  html = html.replace(
+    /<a href="\/login" class="btn btn-outline">Start Free Trial<\/a>/g,
+    '<a href="/dashboard" class="btn btn-outline">Go to Dashboard</a>'
+  );
+  return html;
+}
+
 function extractPathParam(pathname, basePath) {
   if (!pathname.startsWith(basePath)) return null;
   const remaining = pathname.slice(basePath.length);
@@ -114,17 +153,20 @@ export default {
 
     // Marketing landing page
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      return htmlResponse(MARKETING_HTML);
+      const user = await authenticateRequest(request, env).catch(() => null);
+      return htmlResponse(swapNavForAuth(MARKETING_HTML, user));
     }
 
     // Policies page
     if (url.pathname === '/policies') {
-      return htmlResponse(POLICIES_HTML);
+      const user = await authenticateRequest(request, env).catch(() => null);
+      return htmlResponse(swapNavForAuth(POLICIES_HTML, user));
     }
 
     // Help page
     if (url.pathname === '/help') {
-      return htmlResponse(HELP_HTML);
+      const user = await authenticateRequest(request, env).catch(() => null);
+      return htmlResponse(swapNavForAuth(HELP_HTML, user));
     }
 
     // Sitemap
@@ -232,7 +274,7 @@ Sitemap: https://shelobweb.com/sitemap.xml`;
           const existing = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(devUser.userId).first();
           if (!existing) {
             const trialEnds = new Date();
-            trialEnds.setDate(trialEnds.getDate() + 14);
+            trialEnds.setDate(trialEnds.getDate() + 7);
             await env.DB.prepare(
               `INSERT INTO users (id, email, plan, trial_ends_at) VALUES (?, ?, 'trial', ?)`
             ).bind(devUser.userId, devUser.email, trialEnds.toISOString().split('T')[0]).run();

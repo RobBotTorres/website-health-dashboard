@@ -85,9 +85,9 @@ async function upsertUser(db, userId, email) {
     ).bind(userId).first();
 
     if (!existing) {
-      // First login — create user with 14-day trial
+      // First login — create user with 7-day trial
       const trialEnds = new Date();
-      trialEnds.setDate(trialEnds.getDate() + 14);
+      trialEnds.setDate(trialEnds.getDate() + 7);
       const trialEndsStr = trialEnds.toISOString().split('T')[0];
 
       await db.prepare(
