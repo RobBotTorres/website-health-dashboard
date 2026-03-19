@@ -322,12 +322,13 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
       console.error(`Failed Search Console for ${domain}: ${e.message}`);
     }
 
-    // Fetch and store performance history data
+    // Fetch PageSpeed Insights once — reuse for history, snapshot, and Lighthouse a11y
+    let psiResult = null;
     try {
       if (env.PAGESPEED_API_KEY) {
         console.log(`Fetching performance data for ${domain}...`);
-        const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
-        if (cwv && !cwv.error) {
+        psiResult = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+        if (psiResult && !psiResult.error) {
           await env.DB.prepare(`
             INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -336,12 +337,12 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
               inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
           `).bind(
             domain, today,
-            cwv.LCP || null, cwv.FCP || null, cwv.CLS || null,
-            cwv.INP || null, cwv.TTFB || null,
+            psiResult.LCP || null, psiResult.FCP || null, psiResult.CLS || null,
+            psiResult.INP || null, psiResult.TTFB || null,
             new Date().toISOString(),
             userId
           ).run();
-          console.log(`Stored performance history for ${domain}: LCP=${cwv.LCP}ms`);
+          console.log(`Stored performance history for ${domain}: LCP=${psiResult.LCP}ms`);
         }
       }
     } catch (e) {
@@ -363,27 +364,23 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
         ).bind(domain, userId).first();
         if (dbProperty) {
           await fetchAndStorePerformance(env, domain, dbProperty.id, today, userId);
-        } else {
-          // No specific property found, store basic CWV snapshot
+        } else if (psiResult && !psiResult.error) {
+          // No specific property found, store basic CWV snapshot (reuse PSI result)
           console.log(`Storing basic CWV snapshot for ${domain}...`);
-          if (env.PAGESPEED_API_KEY) {
-            const cwv = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
-            if (cwv && !cwv.error) {
-              await env.DB.prepare(`
-                INSERT OR REPLACE INTO performance_snapshots (
-                  domain, snapshot_date, user_id,
-                  cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
-                  cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              `).bind(
-                domain, today, userId,
-                cwv.LCP || null, cwv.lcpRating || null, cwv.INP || null, cwv.inpRating || null,
-                cwv.CLS ?? null, cwv.clsRating || null, cwv.FCP || null, cwv.fcpRating || null,
-                cwv.TTFB || null, cwv.overallCategory || null
-              ).run();
-              console.log(`Stored basic CWV snapshot for ${domain}`);
-            }
-          }
+          await env.DB.prepare(`
+            INSERT OR REPLACE INTO performance_snapshots (
+              domain, snapshot_date, user_id,
+              cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
+              cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall, lighthouse_a11y
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            domain, today, userId,
+            psiResult.LCP || null, psiResult.lcpRating || null, psiResult.INP || null, psiResult.inpRating || null,
+            psiResult.CLS ?? null, psiResult.clsRating || null, psiResult.FCP || null, psiResult.fcpRating || null,
+            psiResult.TTFB || null, psiResult.overallCategory || null,
+            psiResult.accessibility ? JSON.stringify(psiResult.accessibility) : null
+          ).run();
+          console.log(`Stored basic CWV snapshot for ${domain}`);
         }
       }
     } catch (e) {
@@ -1461,8 +1458,9 @@ export async function fetchAndStorePerformance(env, domain, propertyId, dataDate
         cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
         cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall,
         ga4_sessions, ga4_sessions_change, ga4_users, ga4_users_change,
-        ga4_bounce_rate, ga4_avg_duration, ga4_engagement_rate, ga4_page_views, ga4_top_pages
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ga4_bounce_rate, ga4_avg_duration, ga4_engagement_rate, ga4_page_views, ga4_top_pages,
+        lighthouse_a11y
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       domain, dataDate, userId,
       cloudflare.requests || 0,
@@ -1479,7 +1477,8 @@ export async function fetchAndStorePerformance(env, domain, propertyId, dataDate
       ga4.newUsers || null, parseFloat(ga4.newUsersChange) || null,
       parseFloat(ga4.bounceRate) || null, ga4.avgDuration || null,
       parseFloat(ga4.engagementRate) || null, ga4.pageViews || null,
-      ga4.topPages ? JSON.stringify(ga4.topPages) : null
+      ga4.topPages ? JSON.stringify(ga4.topPages) : null,
+      cwv.accessibility ? JSON.stringify(cwv.accessibility) : null
     ).run();
 
     console.log(`Stored performance snapshot for ${domain}`);
