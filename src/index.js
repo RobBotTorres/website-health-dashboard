@@ -561,28 +561,6 @@ async function routeAuthenticated(url, request, env, user) {
       return jsonResponse({ status: 'Audit triggered for all properties' });
     }
 
-    if (url.pathname === '/api/debug-psi') {
-      const domain = url.searchParams.get('domain') || 'robbietorres.info';
-      const { fetchPageSpeedInsights } = await import('./google-api.js');
-      try {
-        const result = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
-        return jsonResponse({
-          domain,
-          hasKey: !!env.PAGESPEED_API_KEY,
-          keyPrefix: env.PAGESPEED_API_KEY ? env.PAGESPEED_API_KEY.substring(0, 8) + '...' : null,
-          testedDomain: result?.testedDomain,
-          hasAccessibility: !!result?.accessibility,
-          a11yScore: result?.accessibility?.score ?? null,
-          source: result?.source,
-          LCP: result?.LCP,
-          note: result?.note,
-          error: result?.error
-        });
-      } catch (e) {
-        return jsonResponse({ error: e.message, stack: e.stack?.split('\n').slice(0, 3) });
-      }
-    }
-
     if (url.pathname === '/api/debug-sitemap') {
       const domain = url.searchParams.get('domain');
       if (!domain) return errorResponse('Missing domain parameter');

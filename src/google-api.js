@@ -521,7 +521,9 @@ export async function fetchPageSpeedInsights(domain, apiKey) {
         url += `&key=${apiKey}`;
       }
 
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: { 'Referer': 'https://shelobweb.com/' }
+      });
 
       if (!response.ok) {
         console.error(`PageSpeed API error for ${testDomain}: ${response.status}`);
