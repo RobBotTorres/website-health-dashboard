@@ -587,13 +587,17 @@ async function getLighthouseA11y(domain, env, user) {
   }
 
   // No cache — make a fresh PSI API call for accessibility
-  if (!env.PAGESPEED_API_KEY) return null;
+  if (!env.PAGESPEED_API_KEY) {
+    console.log('getLighthouseA11y: No PAGESPEED_API_KEY configured');
+    return null;
+  }
 
   try {
+    console.log(`getLighthouseA11y: Making fresh PSI call for ${domain}`);
     const psiResult = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
+    console.log(`getLighthouseA11y: PSI result for ${domain}: hasA11y=${!!psiResult?.accessibility}, note=${psiResult?.note || 'none'}, testedDomain=${psiResult?.testedDomain || 'none'}`);
     if (psiResult?.accessibility) {
-      // Cache was already written by the performance handler if it ran,
-      // but also write here if this is the first call
+      // Cache the result in performance_snapshots
       if (env.DB && psiResult.accessibility) {
         const { endDate: today } = getDateRangePST(0);
         try {
