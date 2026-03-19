@@ -355,7 +355,7 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
       const legacyPropertyId = getPropertyIdForDomain(domain);
       if (legacyPropertyId) {
         console.log(`Storing performance snapshot for ${domain} (legacy)...`);
-        await fetchAndStorePerformance(env, domain, legacyPropertyId, today, userId);
+        await fetchAndStorePerformance(env, domain, legacyPropertyId, today, userId, psiResult);
       } else {
         // SaaS user — look up property from DB and store snapshot directly
         console.log(`Storing performance snapshot for ${domain} (SaaS)...`);
@@ -363,7 +363,7 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
           'SELECT id FROM properties WHERE domain = ? AND user_id = ?'
         ).bind(domain, userId).first();
         if (dbProperty) {
-          await fetchAndStorePerformance(env, domain, dbProperty.id, today, userId);
+          await fetchAndStorePerformance(env, domain, dbProperty.id, today, userId, psiResult);
         } else if (psiResult && !psiResult.error) {
           // No specific property found, store basic CWV snapshot (reuse PSI result)
           console.log(`Storing basic CWV snapshot for ${domain}...`);
@@ -1420,7 +1420,7 @@ export async function fetchSiteHealth(domain) {
 }
 
 // Fetch and store performance data in D1
-export async function fetchAndStorePerformance(env, domain, propertyId, dataDate, userId = null) {
+export async function fetchAndStorePerformance(env, domain, propertyId, dataDate, userId = null, existingPsiResult = null) {
   if (!env.DB) return;
 
   try {
@@ -1442,9 +1442,12 @@ export async function fetchAndStorePerformance(env, domain, propertyId, dataDate
       creds = getCredentials(propertyId, env);
     }
 
+    // Reuse existing PSI result if provided, otherwise fetch fresh
     const [cloudflare, cwv, ga4] = await Promise.all([
       fetchCloudflareTraffic(creds.cloudflare, env).catch(e => ({ error: e.message })),
-      fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message })),
+      existingPsiResult
+        ? Promise.resolve(existingPsiResult)
+        : fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message })),
       fetchGA4Analytics(creds.ga4).catch(e => ({ error: e.message }))
     ]);
 

@@ -550,6 +550,21 @@ async function routeAuthenticated(url, request, env, user) {
       return handleGoogleOAuthDisconnect(request, env, user);
     }
 
+    // List GA4 properties available to the user's Google account
+    if (url.pathname === '/api/google/ga4-properties' && request.method === 'GET') {
+      const propertyId = url.searchParams.get('property_id');
+      if (!propertyId) return errorResponse('Missing property_id');
+      const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
+      if (!property) return errorResponse('Property not found', 404);
+      if (!property.google_refresh_token_encrypted) return errorResponse('Google not connected for this property');
+      try {
+        const ga4Props = await listGA4Properties(property.google_refresh_token_encrypted, env);
+        return jsonResponse({ properties: ga4Props });
+      } catch (e) {
+        return jsonResponse({ error: e.message, properties: [] });
+      }
+    }
+
     // ---- Admin/debug ----
     if (url.pathname === '/api/trigger-audit') {
       const domain = url.searchParams.get('domain');
@@ -623,6 +638,7 @@ async function handleListProperties(env, user) {
     domain: p.domain,
     color: p.color,
     createdAt: p.created_at,
+    ga4PropertyId: p.ga4_property_id || null,
     integrations: {
       google: !!p.google_refresh_token_encrypted,
       cloudflare: !!p.cf_api_token_encrypted || !!p.cf_zone_ids,
@@ -976,7 +992,38 @@ async function handleGoogleOAuthCallback(url, env) {
       'UPDATE properties SET google_refresh_token_encrypted = ? WHERE id = ? AND user_id = ?'
     ).bind(encryptedRefreshToken, property_id, user_id).run();
 
-    return htmlResponse(oauthResultPage('Google connected successfully!', 'success'));
+    // Auto-discover GA4 property ID for the connected domain
+    let ga4Status = '';
+    try {
+      const property = await env.DB.prepare('SELECT domain, ga4_property_id FROM properties WHERE id = ?').bind(property_id).first();
+      if (property && !property.ga4_property_id) {
+        const ga4Props = await listGA4Properties(encryptedRefreshToken, env);
+        // Try to match by domain
+        const domain = property.domain?.toLowerCase();
+        const match = ga4Props.find(p => {
+          const urls = (p.websiteUrl || '').toLowerCase();
+          return urls.includes(domain);
+        });
+        if (match) {
+          await env.DB.prepare(
+            'UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?'
+          ).bind(match.propertyId, property_id, user_id).run();
+          ga4Status = ' GA4 property auto-detected: ' + match.displayName;
+        } else if (ga4Props.length === 1) {
+          // Only one GA4 property — use it
+          await env.DB.prepare(
+            'UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?'
+          ).bind(ga4Props[0].propertyId, property_id, user_id).run();
+          ga4Status = ' GA4 property auto-detected: ' + ga4Props[0].displayName;
+        } else if (ga4Props.length > 1) {
+          ga4Status = ' Found ' + ga4Props.length + ' GA4 properties — please select one in Settings.';
+        }
+      }
+    } catch (e) {
+      console.error('GA4 auto-detect error:', e.message);
+    }
+
+    return htmlResponse(oauthResultPage('Google connected successfully!' + ga4Status, 'success'));
 
   } catch (err) {
     console.error('OAuth callback error:', err);
@@ -999,6 +1046,69 @@ async function handleGoogleOAuthDisconnect(request, env, user) {
   ).bind(propertyId, user.userId).run();
 
   return jsonResponse({ message: 'Google disconnected successfully' });
+}
+
+/**
+ * List GA4 properties accessible via the user's OAuth token.
+ * Uses the GA4 Admin API to enumerate properties.
+ */
+async function listGA4Properties(encryptedRefreshToken, env) {
+  const { decryptToken, refreshAccessToken } = await import('./google-oauth.js');
+  const refreshToken = await decryptToken(encryptedRefreshToken, env.ENCRYPTION_KEY);
+  const tokens = await refreshAccessToken(refreshToken, env.GOOGLE_OAUTH_CLIENT_ID, env.GOOGLE_OAUTH_CLIENT_SECRET);
+  const accessToken = tokens.access_token;
+
+  // List all GA4 accounts first
+  const accountsRes = await fetch('https://analyticsadmin.googleapis.com/v1beta/accounts', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const accountsData = await accountsRes.json();
+  const accounts = accountsData.accounts || [];
+
+  const properties = [];
+  for (const account of accounts) {
+    const accountId = account.name; // e.g. "accounts/123456"
+    const propsRes = await fetch(
+      `https://analyticsadmin.googleapis.com/v1beta/properties?filter=parent:${accountId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }
+    );
+    const propsData = await propsRes.json();
+    for (const prop of (propsData.properties || [])) {
+      // prop.name is like "properties/123456789"
+      const numericId = prop.name.replace('properties/', '');
+      properties.push({
+        propertyId: numericId,
+        displayName: prop.displayName,
+        websiteUrl: prop.industryCategory || '',
+        // GA4 doesn't directly expose the website URL in the same way UA did,
+        // but we can check data streams for the URL
+        name: prop.name,
+        account: account.displayName
+      });
+    }
+  }
+
+  // For each property, try to get data streams to find the website URL
+  for (const prop of properties) {
+    try {
+      const streamsRes = await fetch(
+        `https://analyticsadmin.googleapis.com/v1beta/${prop.name}/dataStreams`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }
+      );
+      const streamsData = await streamsRes.json();
+      const webStreams = (streamsData.dataStreams || []).filter(s => s.type === 'WEB_DATA_STREAM');
+      if (webStreams.length > 0) {
+        prop.websiteUrl = webStreams[0].webStreamData?.defaultUri || '';
+        prop.streamName = webStreams[0].displayName || '';
+      }
+    } catch (e) {
+      // Non-critical
+    }
+  }
+
+  return properties;
 }
 
 function oauthResultPage(message, type) {
