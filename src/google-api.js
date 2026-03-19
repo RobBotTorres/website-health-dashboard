@@ -512,7 +512,7 @@ export async function fetchAndStoreSearchConsole(env, domain, propertyId, dataDa
 }
 
 export async function fetchPageSpeedInsights(domain, apiKey) {
-  const domainsToTry = [`www.${domain}`, `shop.${domain}`, domain];
+  const domainsToTry = [domain, `www.${domain}`];
 
   for (const testDomain of domainsToTry) {
     try {
