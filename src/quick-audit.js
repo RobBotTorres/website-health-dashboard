@@ -5,7 +5,7 @@
 // Results are stored in D1 and cached in KV for immediate dashboard display.
 // ============================================================================
 
-import { auditSinglePageWithLinks, storeAuditInD1 } from './audit.js';
+import { auditSinglePageWithLinks, storeAuditInD1, checkAIReadiness } from './audit.js';
 import { fetchPageSpeedInsights } from './google-api.js';
 
 /**
@@ -25,14 +25,16 @@ export async function runQuickAudit(domain, propertyId, userId, env) {
   const homepageUrl = `https://www.${domain}/`;
   const altUrl = `https://${domain}/`;
 
-  // Run homepage audit + PageSpeed in parallel
-  const [pageResult, pageSpeedResult] = await Promise.allSettled([
+  // Run homepage audit + PageSpeed + AI readiness in parallel
+  const [pageResult, pageSpeedResult, aiReadinessResult] = await Promise.allSettled([
     auditHomepage(homepageUrl, altUrl, domain),
-    fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message }))
+    fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY).catch(e => ({ error: e.message })),
+    checkAIReadiness(domain).catch(e => ({ error: e.message }))
   ]);
 
   const pageAudit = pageResult.status === 'fulfilled' ? pageResult.value : null;
   const pageSpeed = pageSpeedResult.status === 'fulfilled' ? pageSpeedResult.value : null;
+  const aiReadiness = aiReadinessResult.status === 'fulfilled' ? aiReadinessResult.value : null;
 
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -44,6 +46,7 @@ export async function runQuickAudit(domain, propertyId, userId, env) {
     durationSeconds: parseFloat(duration),
     homepage: summarizePageAudit(pageAudit),
     performance: summarizePageSpeed(pageSpeed),
+    aiReadiness: aiReadiness && !aiReadiness.error ? aiReadiness : null,
     issueCount: 0
   };
 
@@ -54,15 +57,25 @@ export async function runQuickAudit(domain, propertyId, userId, env) {
 
   // Store results in D1
   try {
-    await storeQuickAuditResults(env.DB, domain, propertyId, userId, pageAudit, pageSpeed);
+    await storeQuickAuditResults(env, domain, propertyId, userId, pageAudit, pageSpeed, aiReadiness);
   } catch (e) {
     console.error('Failed to store quick audit results:', e.message);
   }
 
-  // Cache in KV for immediate dashboard display
+  // Cache in KV for immediate dashboard display (use both key formats for compatibility)
   try {
-    const cacheKey = `quickaudit:${userId}:${domain}`;
-    await env.SEO_AUDITS.put(cacheKey, JSON.stringify(result), { expirationTtl: 86400 });
+    const resultJson = JSON.stringify(result);
+    await env.SEO_AUDITS.put(`quickaudit:${userId}:${domain}`, resultJson, { expirationTtl: 86400 });
+    // Also store under the key that handleSiteHealth reads from
+    await env.SEO_AUDITS.put(`audit:${userId}:${domain}`, JSON.stringify({
+      domain,
+      auditDate: new Date().toISOString().split('T')[0],
+      totalUrls: 1,
+      audited: 1,
+      pages: pageAudit ? [pageAudit] : [],
+      brokenLinks: [],
+      quickAudit: true
+    }), { expirationTtl: 86400 });
   } catch (e) {
     console.error('Failed to cache quick audit:', e.message);
   }
@@ -207,7 +220,8 @@ function calculateOverallRating(ps) {
 /**
  * Store quick audit results in D1 tables (issues, accessibility_issues, performance).
  */
-async function storeQuickAuditResults(db, domain, propertyId, userId, pageAudit, pageSpeed) {
+async function storeQuickAuditResults(env, domain, propertyId, userId, pageAudit, pageSpeed, aiReadiness) {
+  const db = env.DB;
   const auditDate = new Date().toISOString().split('T')[0];
 
   // If we got a valid page audit, build the audit object and store it
@@ -217,10 +231,19 @@ async function storeQuickAuditResults(db, domain, propertyId, userId, pageAudit,
       audited: 1,
       duration: 0,
       pages: [pageAudit],
-      brokenLinks: []
+      brokenLinks: [],
+      aiReadiness: aiReadiness || null
     };
 
-    await storeAuditInD1(db, domain, auditDate, quickAuditData, userId);
+    await storeAuditInD1(env, domain, auditDate, quickAuditData, userId);
+  } else if (aiReadiness && !aiReadiness.error) {
+    // Even if page audit failed, still store AI readiness data
+    const minimalAudit = {
+      totalUrls: 0, audited: 0, duration: 0,
+      pages: [], brokenLinks: [],
+      aiReadiness
+    };
+    await storeAuditInD1(env, domain, auditDate, minimalAudit, userId);
   }
 
   // Store performance data if available
@@ -248,8 +271,9 @@ async function storeQuickAuditResults(db, domain, propertyId, userId, pageAudit,
         INSERT OR REPLACE INTO performance_snapshots (
           domain, snapshot_date, user_id,
           cwv_lcp, cwv_lcp_rating, cwv_inp, cwv_inp_rating, cwv_cls, cwv_cls_rating,
-          cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall, lighthouse_a11y
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cwv_fcp, cwv_fcp_rating, cwv_ttfb, cwv_overall, cwv_source, cwv_performance_score,
+          cwv_speed_index, cwv_tested_domain, lighthouse_a11y
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         domain, auditDate, userId,
         pageSpeed.LCP || null, pageSpeed.lcpRating || null,
@@ -257,6 +281,10 @@ async function storeQuickAuditResults(db, domain, propertyId, userId, pageAudit,
         pageSpeed.CLS ?? null, pageSpeed.clsRating || null,
         pageSpeed.FCP || null, pageSpeed.fcpRating || null,
         pageSpeed.TTFB || null, pageSpeed.overallCategory || null,
+        pageSpeed.source || 'lighthouse',
+        pageSpeed.performanceScore || null,
+        pageSpeed.speedIndex || null,
+        pageSpeed.testedUrl || domain,
         pageSpeed.accessibility ? JSON.stringify(pageSpeed.accessibility) : null
       ).run();
     } catch (e) {

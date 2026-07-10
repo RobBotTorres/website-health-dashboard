@@ -3,14 +3,197 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shelob Web — Monitor Your Website SEO, Performance & Accessibility</title>
-  <meta name="description" content="Monitor your websites' SEO, Core Web Vitals, accessibility, and broken links in one dashboard. Get instant results and daily automated audits.">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='white' stroke-width='1.5' opacity='0.3'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='white' stroke-width='1.5' opacity='0.5'/%3E%3Ccircle cx='32' cy='32' r='6' fill='none' stroke='white' stroke-width='1.5' opacity='0.8'/%3E%3Cline x1='32' y1='8' x2='32' y2='56' stroke='white' stroke-width='1.5'/%3E%3Cline x1='8' y1='32' x2='56' y2='32' stroke='white' stroke-width='1.5'/%3E%3Cline x1='15' y1='15' x2='49' y2='49' stroke='white' stroke-width='1.5'/%3E%3Cline x1='49' y1='15' x2='15' y2='49' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+  <title>Shelob Web — SEO, Performance, Accessibility, AI Readiness & AEO Dashboard</title>
+  <meta name="description" content="Monitor SEO, Core Web Vitals, accessibility, AI readiness, and Answer Engine Optimization (AEO) across all your websites. Connects Google Analytics, Search Console, and Cloudflare. Daily automated audits with AI-powered fix suggestions.">
+  <link rel="canonical" href="https://shelobweb.com/">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://shelobweb.com/">
+  <meta property="og:title" content="Shelob Web — Website Health, AI Readiness & AEO Monitoring">
+  <meta property="og:description" content="Monitor SEO, Core Web Vitals, accessibility, AI readiness, and Answer Engine Optimization (AEO) across all your websites. Daily automated audits with AI-powered fix suggestions.">
+  <meta property="og:site_name" content="Shelob Web">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:image" content="https://shelobweb.com/images/sw_logo.png">
+  <meta property="og:image:alt" content="Shelob Web logo">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Shelob Web — Website Health, AI Readiness & AEO Monitoring">
+  <meta name="twitter:description" content="Monitor SEO, Core Web Vitals, accessibility, AI readiness, and Answer Engine Optimization (AEO) across all your websites.">
+  <meta name="twitter:image" content="https://shelobweb.com/images/sw_logo.png">
+
+  <link rel="icon" type="image/png" href="/images/sw_logo.png">
+
+  <!-- IBM Plex Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Shelob Web",
+    "url": "https://shelobweb.com",
+    "applicationCategory": "WebApplication",
+    "operatingSystem": "Web",
+    "description": "Website health monitoring dashboard that tracks SEO, Core Web Vitals, accessibility, AI readiness, and broken links with daily automated audits and AI-powered fix suggestions.",
+    "offers": [
+      {
+        "@type": "Offer",
+        "name": "Trial",
+        "price": "0",
+        "priceCurrency": "USD",
+        "description": "7-day free trial with 1 website — SEO, performance, accessibility, and broken link detection"
+      },
+      {
+        "@type": "Offer",
+        "name": "Pro",
+        "price": "29",
+        "priceCurrency": "USD",
+        "billingIncrement": "P1M",
+        "description": "Up to 5 websites with Google Analytics, Search Console, Cloudflare integrations, AI readiness scoring, and AI fix suggestions"
+      },
+      {
+        "@type": "Offer",
+        "name": "Agency",
+        "price": "59",
+        "priceCurrency": "USD",
+        "billingIncrement": "P1M",
+        "description": "Up to 25 websites with team invites, role-based access control, CSV export, and priority support"
+      }
+    ],
+    "featureList": [
+      "SEO auditing with issue tracking",
+      "Core Web Vitals monitoring (LCP, INP, CLS, FCP, TTFB)",
+      "Accessibility checks powered by Lighthouse",
+      "AI readiness scoring for LLM and chatbot optimization",
+      "Answer Engine Optimization (AEO) scoring",
+      "AI-powered fix suggestions",
+      "Google Analytics 4 integration",
+      "Google Search Console integration",
+      "Cloudflare analytics integration",
+      "Broken link detection",
+      "Daily automated site audits",
+      "Team collaboration with role-based access",
+      "Keyword tracking and ranking opportunities",
+      "Performance trend charts"
+    ],
+    "provider": {
+      "@type": "Organization",
+      "name": "Shelob Web",
+      "url": "https://shelobweb.com"
+    }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What does Shelob Web monitor?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Shelob Web monitors SEO health, Core Web Vitals performance, accessibility compliance, AI readiness, and broken links across all your websites. It integrates with Google Analytics 4, Google Search Console, and Cloudflare for comprehensive insights."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How do automated audits work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "After you add a website, Shelob Web runs an instant audit of your homepage. Then, a full-site crawl runs automatically every night, checking every page in your sitemap for SEO issues, accessibility problems, broken links, and AI readiness signals. Results update on your dashboard each morning."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is AI readiness scoring?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "AI readiness scoring measures how well your website works with AI search engines and chatbots like ChatGPT, Perplexity, Google AI Overviews, and Claude. It checks for llms.txt files, AI bot access in robots.txt, structured data depth, content clarity, and client-side rendering issues that can prevent AI systems from understanding your content."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is Answer Engine Optimization (AEO)?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Answer Engine Optimization (AEO) is the practice of structuring your website so AI answer engines like ChatGPT, Perplexity, Google AI Overviews, and Claude can find, understand, and cite your content. Where traditional SEO optimizes for ranked links, AEO optimizes for being quoted directly in AI-generated answers. Shelob Web measures your AEO signals: FAQ and structured data markup, llms.txt presence, AI crawler access, concise answer formatting, author and date signals, and server-side rendered content."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How is AEO different from SEO?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "SEO (Search Engine Optimization) aims to rank your pages in traditional search results so users click through to your site. AEO (Answer Engine Optimization) aims to get your content extracted and cited inside AI-generated answers, where there may be no click at all. They overlap, but AEO adds requirements like llms.txt files, explicit AI bot permissions, FAQ schema, and content written in clear, self-contained answers. Shelob Web scores both."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How much does Shelob Web cost?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Shelob Web offers a free 7-day trial with one website and no credit card required. The Pro plan is $29 per month for up to 5 websites with all integrations, AI readiness scoring, and AI fix suggestions. The Agency plan is $59 per month for up to 25 websites, team invites with role-based access control, CSV export, and priority support."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need to install anything?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Shelob Web is a cloud-based tool that works by crawling your public website. There is no code to install, no scripts to add, and no plugins required. Just enter your domain and start monitoring."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I invite my team?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. On the Agency plan, you can invite team members via email with role-based access control. Admins have full control over sites and billing, while members can view the dashboard and track issues across all properties."
+        }
+      }
+    ]
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Shelob Web",
+    "url": "https://shelobweb.com",
+    "logo": "https://shelobweb.com/images/sw_logo.png",
+    "description": "Website health monitoring platform tracking SEO, Core Web Vitals, accessibility, AI readiness, and Answer Engine Optimization (AEO) with daily automated audits.",
+    "foundingDate": "2025",
+    "areaServed": "Worldwide"
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Shelob Web",
+    "url": "https://shelobweb.com",
+    "description": "Monitor SEO, Core Web Vitals, accessibility, AI readiness, and AEO across all your websites.",
+    "publisher": {
+      "@type": "Organization",
+      "name": "Shelob Web"
+    }
+  }
+  </script>
+
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    :root{--bg:#0f1117;--card:#1a1d2e;--card2:#151828;--border:#2a2d3e;--blue:#6366f1;--blue-hover:#5558e6;--blue-glow:rgba(99,102,241,0.15);--green:#22c55e;--orange:#f59e0b;--red:#ef4444;--text:#e2e8f0;--text2:#94a3b8;--text3:#8191a6}
+    :root{--bg:#0a0c14;--bg2:#0f1219;--card:#131624;--card2:#181c2e;--border:#1e2235;--border2:#262a40;--blue:#818cf8;--blue-deep:#6366f1;--blue-hover:#a5b4fc;--blue-glow:rgba(99,102,241,0.12);--green:#34d399;--green-dim:rgba(52,211,153,0.15);--orange:#fbbf24;--orange-dim:rgba(251,191,36,0.12);--red:#f87171;--red-dim:rgba(248,113,113,0.12);--purple:#c084fc;--purple-dim:rgba(192,132,252,0.12);--text:#f1f5f9;--text2:#94a3b8;--text3:#64748b;--mono:'IBM Plex Mono',monospace}
     html{scroll-behavior:smooth;scroll-padding-top:70px;-webkit-text-size-adjust:100%}
-    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+    body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+    /* Subtle noise texture overlay */
+    body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-repeat:repeat;background-size:256px 256px}
     a{color:var(--blue);text-decoration:none;touch-action:manipulation}
 
     /* ========================================
@@ -18,76 +201,156 @@
        ======================================== */
 
     /* Nav */
-    nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(15,17,23,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 16px}
-    .nav-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:60px}
-    .nav-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--text);text-decoration:none;min-height:44px}
-    .nav-logo svg{width:32px;height:32px}
-    .nav-links{display:flex;align-items:center;gap:6px}
+    nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,12,20,0.85);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);border-bottom:1px solid var(--border);padding:0 16px}
+    .nav-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;height:60px}
+    .nav-logo{display:flex;align-items:center;gap:8px;font-weight:700;font-size:17px;color:var(--text);text-decoration:none;min-height:44px;letter-spacing:-0.02em;white-space:nowrap;flex-shrink:0}
+    .nav-logo img{flex-shrink:0}
+    .nav-links{display:flex;align-items:center;gap:8px;flex-shrink:0}
     .nav-links a{color:var(--text2);font-size:14px;transition:color 0.2s;min-height:44px;display:inline-flex;align-items:center;padding:8px}
     .nav-links a:hover{color:var(--text)}
     .nav-links a:not(.btn){display:none}
-    .nav-links .btn-outline{display:none}
+    /* On mobile: keep Sign In visible (compact) so users can always log in */
+    .nav-links .btn{white-space:nowrap}
+    .nav-links .btn-outline{display:inline-flex;padding:9px 12px;font-size:13px}
+    .nav-links .btn-primary{padding:9px 12px;font-size:13px}
 
-    /* Buttons — WCAG 2.5.8 AA: 44px min touch targets */
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;text-decoration:none;min-height:44px;touch-action:manipulation}
-    .btn-primary{background:var(--blue);color:#fff}
-    .btn-primary:hover{background:var(--blue-hover);transform:translateY(-1px)}
-    .btn-outline{background:transparent;color:var(--text);border:1px solid var(--border)}
+    /* Buttons — WCAG AA compliant */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;text-decoration:none;min-height:44px;touch-action:manipulation;font-family:inherit}
+    .btn-primary{background:#fff;color:#0f1219}
+    .btn-primary:hover{background:#e2e8f0;transform:translateY(-1px)}
+    .btn-outline{background:transparent;color:var(--text);border:1px solid var(--border2)}
     .btn-outline:hover{border-color:var(--text3);background:var(--card)}
+    .btn-glow{background:linear-gradient(135deg,#818cf8,#6366f1);color:#fff;box-shadow:0 0 20px rgba(99,102,241,0.3)}
+    .btn-glow:hover{box-shadow:0 0 30px rgba(99,102,241,0.5);transform:translateY(-1px)}
 
-    /* Hero — mobile base */
-    .hero{padding:100px 20px 60px;text-align:center;max-width:800px;margin:0 auto}
-    .hero-badge{display:inline-block;padding:8px 16px;border-radius:20px;background:var(--blue-glow);color:var(--blue);font-size:13px;font-weight:600;margin-bottom:20px;border:1px solid rgba(99,102,241,0.2)}
-    .hero h1{font-size:clamp(28px,6vw,52px);font-weight:800;line-height:1.15;margin-bottom:20px;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-    .hero p{font-size:16px;color:var(--text2);max-width:600px;margin:0 auto 28px;line-height:1.7}
+    /* Hero */
+    .hero-wrap{position:relative;overflow:hidden}
+    .hero-bg{position:absolute;inset:0;pointer-events:none}
+    .hero-bg .orb{position:absolute;border-radius:50%;filter:blur(80px);opacity:0.35}
+    .hero-bg .orb-1{width:500px;height:500px;background:radial-gradient(circle,#6366f1 0%,transparent 70%);top:-120px;right:-80px}
+    .hero-bg .orb-2{width:400px;height:400px;background:radial-gradient(circle,#a855f7 0%,transparent 70%);bottom:-80px;left:-100px}
+    .hero-bg .orb-3{width:300px;height:300px;background:radial-gradient(circle,#22d3ee 0%,transparent 70%);top:40%;left:50%;transform:translateX(-50%)}
+    .hero-grid{position:absolute;inset:0;background-image:radial-gradient(rgba(99,102,241,0.08) 1px,transparent 1px);background-size:24px 24px;mask-image:radial-gradient(ellipse 60% 60% at 50% 40%,#000 20%,transparent 70%);-webkit-mask-image:radial-gradient(ellipse 60% 60% at 50% 40%,#000 20%,transparent 70%)}
+    .hero{position:relative;padding:92px 22px 56px;text-align:center;max-width:800px;margin:0 auto}
+    .hero-badge{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:20px;background:var(--card2);color:var(--blue);font-size:11.5px;font-weight:500;margin-bottom:22px;border:1px solid var(--border2);font-family:var(--mono);letter-spacing:-0.01em;max-width:100%}
+    .hero-badge::before{content:'';display:block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);flex-shrink:0}
+    .hero h1{font-size:clamp(33px,8.5vw,56px);font-weight:700;line-height:1.12;margin-bottom:18px;letter-spacing:-0.03em;color:var(--text);text-wrap:balance}
+    .hero h1 .gradient{background:linear-gradient(135deg,#818cf8 0%,#c084fc 50%,#22d3ee 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap}
+    .hero h1 .nb{white-space:nowrap}
+    .hero p{font-size:16px;color:var(--text2);max-width:36ch;margin:0 auto 30px;line-height:1.55;text-wrap:pretty}
     .hero-cta{display:flex;flex-direction:column;gap:12px;align-items:stretch}
-    .hero-cta .btn{width:100%;justify-content:center;padding:14px 24px;font-size:16px}
-    .hero-sub{color:var(--text3);font-size:13px;margin-top:16px}
+    .hero-cta .btn{width:100%;justify-content:center;padding:15px 24px;font-size:16px}
+    .hero-sub{color:var(--text3);font-size:12px;margin-top:18px;font-family:var(--mono);line-height:1.7;letter-spacing:-0.01em;max-width:32ch;margin-left:auto;margin-right:auto;text-wrap:balance}
 
-    /* Sections — mobile base */
-    .section{padding:60px 20px;max-width:1100px;margin:0 auto}
+    /* Section divider */
+    .section-divider{height:1px;background:linear-gradient(90deg,transparent,var(--border2) 20%,var(--blue-glow) 50%,var(--border2) 80%,transparent);max-width:1100px;margin:0 auto}
+
+    /* Sections */
+    .section{padding:60px 20px;max-width:1100px;margin:0 auto;position:relative}
     .section-title{text-align:center;margin-bottom:36px}
-    .section-title h2{font-size:24px;font-weight:700;margin-bottom:12px}
-    .section-title p{color:var(--text2);font-size:15px;max-width:560px;margin:0 auto}
+    .section-title h2{font-size:25px;font-weight:700;margin-bottom:12px;letter-spacing:-0.02em;line-height:1.2;text-wrap:balance}
+    .section-title .tag{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--blue);background:var(--blue-glow);padding:4px 12px;border-radius:4px;margin-bottom:14px;letter-spacing:0.04em;text-transform:uppercase}
+    .section-title p{color:var(--text2);font-size:15px;max-width:46ch;margin:0 auto;line-height:1.55;text-wrap:pretty}
 
-    /* Features grid — single column on mobile */
-    .features-grid{display:grid;grid-template-columns:1fr;gap:16px}
-    .feature-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;transition:border-color 0.2s,transform 0.2s}
-    .feature-card:hover{border-color:var(--blue);transform:translateY(-2px)}
+    /* Ambient section glows — full bleed behind max-width sections */
+    .section-glow{position:static}
+    .section-glow-wrap{position:relative;overflow:hidden}
+    .section-glow-wrap::before{content:'';position:absolute;pointer-events:none;border-radius:50%;filter:blur(140px);z-index:0}
+    .section-glow-wrap>*{position:relative;z-index:1}
+    .glow-purple::before{width:700px;height:500px;background:#a855f7;opacity:0.1;top:-120px;right:-100px}
+    .glow-blue::before{width:600px;height:450px;background:#6366f1;opacity:0.1;bottom:-100px;left:-80px}
+    .glow-green::before{width:600px;height:400px;background:#22d3ee;opacity:0.09;top:40%;left:50%;transform:translateX(-50%)}
+    .glow-orange::before{width:600px;height:450px;background:#f59e0b;opacity:0.05;top:-80px;left:-100px}
+
+    /* Features grid */
+    .features-grid{display:grid;grid-template-columns:1fr;gap:12px}
+    .feature-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;transition:border-color 0.3s,transform 0.3s,box-shadow 0.3s;position:relative;overflow:hidden}
+    .feature-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--blue-deep),transparent);opacity:0;transition:opacity 0.3s}
+    .feature-card::after{content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,0.06),transparent 70%);pointer-events:none;transition:opacity 0.3s}
+    .feature-card:hover{border-color:var(--border2);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,0.3),0 0 0 1px rgba(99,102,241,0.08)}
+    .feature-card:hover::before{opacity:1}
+    .feature-card:hover::after{opacity:1.5}
     .feature-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-size:22px}
-    .feature-card h3{font-size:17px;margin-bottom:8px}
-    .feature-card p{color:var(--text2);font-size:14px;line-height:1.6}
-    .fi-seo{background:rgba(99,102,241,0.15)}
-    .fi-perf{background:rgba(34,197,94,0.15)}
-    .fi-a11y{background:rgba(245,158,11,0.15)}
-    .fi-links{background:rgba(239,68,68,0.15)}
-    .fi-gsc{background:rgba(99,102,241,0.15)}
-    .fi-cf{background:rgba(245,158,11,0.15)}
+    .feature-card h3{font-size:16px;margin-bottom:8px;font-weight:600;letter-spacing:-0.01em}
+    .feature-card p{color:var(--text2);font-size:14px;line-height:1.65}
+    .fi-seo{background:rgba(129,140,248,0.12)}
+    .fi-perf{background:var(--green-dim)}
+    .fi-a11y{background:var(--orange-dim)}
+    .fi-links{background:var(--red-dim)}
+    .fi-gsc{background:rgba(129,140,248,0.12)}
+    .fi-cf{background:var(--orange-dim)}
+    .fi-ai{background:var(--purple-dim)}
+    .fi-ga4{background:var(--green-dim)}
+    .fi-team{background:rgba(129,140,248,0.12)}
+    .fi-fix{background:var(--purple-dim)}
 
-    /* Steps — single column on mobile */
-    .steps{display:grid;grid-template-columns:1fr;gap:32px;margin-top:36px}
-    .step{text-align:center;position:relative}
-    .step-num{width:48px;height:48px;border-radius:50%;background:var(--blue);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
-    .step h3{font-size:17px;margin-bottom:8px}
-    .step p{color:var(--text2);font-size:14px;line-height:1.6}
+    /* Steps */
+    .steps{display:grid;grid-template-columns:1fr;gap:24px;margin-top:36px;position:relative}
+    .step{text-align:center;position:relative;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px 20px;overflow:hidden}
+    .step::after{content:'';position:absolute;bottom:-40px;left:50%;width:100px;height:100px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,0.05),transparent 70%);transform:translateX(-50%);pointer-events:none}
+    .step-num{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#818cf8,#6366f1);color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-family:var(--mono);box-shadow:0 4px 16px rgba(99,102,241,0.3)}
+    .step h3{font-size:16px;margin-bottom:8px;font-weight:600}
+    .step p{color:var(--text2);font-size:14px;line-height:1.65}
 
-    /* Pricing — single column on mobile */
+    /* Integrations */
+    .integrations-row{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:24px}
+    .intg-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px 16px;text-align:center;transition:border-color 0.3s,box-shadow 0.3s,transform 0.3s;position:relative;overflow:hidden}
+    .intg-card::before{content:'';position:absolute;inset:0;border-radius:14px;padding:1px;background:linear-gradient(135deg,rgba(99,102,241,0.15),transparent 40%,transparent 60%,rgba(168,85,247,0.1));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;opacity:0;transition:opacity 0.3s}
+    .intg-card:hover{border-color:transparent;transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.2)}
+    .intg-card:hover::before{opacity:1}
+    .intg-card svg{width:28px;height:28px;margin-bottom:12px}
+    .intg-card h4{font-size:14px;margin-bottom:4px;font-weight:600}
+    .intg-card p{color:var(--text3);font-size:12px;line-height:1.5}
+
+    /* Pricing comparison table */
     #pricing{padding-top:40px}
-    .pricing-grid{display:grid;grid-template-columns:1fr;gap:20px;max-width:960px;margin:0 auto}
-    .price-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;position:relative;transition:border-color 0.2s}
-    .price-card.featured{border-color:var(--blue);box-shadow:0 0 40px rgba(99,102,241,0.1)}
-    .price-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--blue);color:#fff;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600}
-    .price-card h3{font-size:20px;margin-bottom:4px}
-    .price-card .price{font-size:36px;font-weight:800;margin:16px 0 4px}
-    .price-card .price span{font-size:16px;font-weight:400;color:var(--text2)}
-    .price-card .period{color:var(--text3);font-size:13px;margin-bottom:20px}
-    .price-card ul{list-style:none;margin-bottom:24px}
-    .price-card li{padding:8px 0;font-size:14px;color:var(--text2);display:flex;align-items:center;gap:10px}
-    .price-card li::before{content:'✓';color:var(--green);font-weight:700;font-size:14px}
-    .price-card .btn{width:100%;justify-content:center;padding:14px;min-height:48px}
+    .pricing-table-wrap{max-width:960px;margin:0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch;background:linear-gradient(180deg,var(--card) 0%,var(--bg2) 100%);border:1px solid var(--border);border-radius:16px;padding:4px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+    .pricing-table-wrap::before{content:'';position:absolute;inset:-1px;border-radius:17px;padding:1px;background:linear-gradient(180deg,rgba(99,102,241,0.15),transparent 50%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+    .pricing-table{width:100%;border-collapse:collapse;min-width:540px}
+    .pricing-table thead th{padding:20px 12px 16px;text-align:center;vertical-align:bottom;border-bottom:1px solid var(--border)}
+    .pricing-table thead th:first-child{text-align:left;width:40%}
+    .pricing-table thead .plan-name{font-size:16px;font-weight:600;display:block;margin-bottom:4px;letter-spacing:-0.01em}
+    .pricing-table thead .plan-price{font-size:28px;font-weight:700;display:block;font-family:var(--mono)}
+    .pricing-table thead .plan-price span{font-size:14px;font-weight:400;color:var(--text2)}
+    .pricing-table thead .plan-period{font-size:12px;color:var(--text3);display:block;margin-top:2px;font-family:var(--mono)}
+    .pricing-table tbody tr{border-bottom:1px solid var(--border)}
+    .pricing-table tbody tr:last-child{border-bottom:none}
+    .pricing-table tbody td{padding:12px;font-size:14px;color:var(--text2);text-align:center;vertical-align:middle}
+    .pricing-table tbody td:first-child{text-align:left;color:var(--text);font-weight:500}
+    .pricing-table .check{color:var(--green);font-weight:700;font-size:16px}
+    .pricing-table .dash{color:var(--text3);font-size:14px}
+    .pricing-table tfoot td{padding:20px 12px;border-top:1px solid var(--border);text-align:center}
+    .pricing-table tfoot td:first-child{text-align:left}
+    .pricing-table tfoot .btn{width:100%;max-width:180px;padding:12px 16px;font-size:14px}
+    .pricing-table .cat-row td{padding:12px 12px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:none;font-family:var(--mono)}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+    /* FAQ */
+    .faq-list{max-width:720px;margin:0 auto}
+    .faq-item{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;transition:border-color 0.2s}
+    .faq-item:hover{border-color:var(--border2)}
+    .faq-q{width:100%;text-align:left;background:none;border:none;font-family:inherit;font-size:15px;font-weight:600;padding:18px 20px;color:var(--text);letter-spacing:-0.01em;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;user-select:none;min-height:44px}
+    .faq-q:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:8px}
+    .faq-q::after{content:'+';font-size:18px;color:var(--text3);transition:transform 0.2s;flex-shrink:0;font-weight:400}
+    .faq-item.open .faq-q::after{content:'\2212';transform:rotate(180deg)}
+    .faq-a{font-size:14px;color:var(--text2);line-height:1.7;padding:0 20px 18px;display:none}
+    .faq-item.open .faq-a{display:block}
+
+    /* CTA banner */
+    .cta-banner{text-align:center;padding:60px 20px;position:relative;overflow:hidden}
+    .cta-banner::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(168,85,247,0.06),rgba(34,211,238,0.04));border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+    .cta-banner::after{content:'';position:absolute;top:50%;left:50%;width:600px;height:300px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(ellipse,rgba(99,102,241,0.08),transparent 70%);pointer-events:none}
+    .cta-banner .inner{position:relative;max-width:600px;margin:0 auto}
+    .cta-banner h2{font-size:28px;font-weight:700;margin-bottom:12px;letter-spacing:-0.02em}
+    .cta-banner p{color:var(--text2);font-size:15px;margin-bottom:24px}
+
+    /* Flow arrows between sections */
+    .flow-arrow{display:flex;justify-content:center;padding:8px 0;color:var(--border2)}
+    .flow-arrow svg{opacity:0.4;animation:flow-pulse 2s ease-in-out infinite}
+    @keyframes flow-pulse{0%,100%{opacity:0.25;transform:translateY(0)}50%{opacity:0.5;transform:translateY(3px)}}
 
     /* Footer */
-    footer{border-top:1px solid var(--border);padding:40px 20px;margin-top:40px}
+    footer{border-top:1px solid var(--border);padding:40px 20px;margin-top:0}
     .footer-inner{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center}
     .footer-links{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
     .footer-links a{color:var(--text3);font-size:13px;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
@@ -102,25 +365,25 @@
       .nav-links{gap:16px}
       .nav-links a:not(.btn){display:inline-flex}
       .nav-links .btn-outline{display:inline-flex}
-      .nav-links .btn{padding:12px 24px;font-size:16px}
-
-      .hero{padding:120px 24px 70px}
-      .hero p{font-size:18px;margin-bottom:36px}
+      .nav-links .btn{padding:12px 24px;font-size:15px}
+      .hero{padding:130px 24px 80px}
+      .hero p{font-size:17px;margin-bottom:36px;max-width:52ch}
+      .hero-sub{font-size:13px;max-width:none}
       .hero-cta{flex-direction:row;align-items:center;justify-content:center}
       .hero-cta .btn{width:auto}
-
       .section{padding:80px 24px}
       .section-title{margin-bottom:48px}
-      .section-title h2{font-size:28px}
-
-      .features-grid{grid-template-columns:repeat(2,1fr);gap:20px}
+      .section-title h2{font-size:30px}
+      .features-grid{grid-template-columns:repeat(2,1fr);gap:16px}
       .feature-card{padding:28px}
-
-      .steps{grid-template-columns:repeat(3,1fr);margin-top:48px}
-
-      .pricing-grid{grid-template-columns:repeat(2,1fr)}
-      .price-card{padding:32px}
-      .price-card .price{font-size:40px}
+      .steps{grid-template-columns:repeat(3,1fr);margin-top:48px;gap:16px}
+      /* Connector lines between steps */
+      .step:not(:last-child)::before{content:'';position:absolute;top:40px;right:-10px;width:20px;height:2px;background:linear-gradient(90deg,var(--blue-deep),transparent);z-index:1}
+      .pricing-table{min-width:auto}
+      .pricing-table thead .plan-price{font-size:32px}
+      .integrations-row{grid-template-columns:repeat(4,1fr);gap:16px}
+      .cta-banner{padding:80px 24px}
+      .cta-banner h2{font-size:32px}
     }
 
     /* ========================================
@@ -129,186 +392,395 @@
     @media(min-width:1024px){
       .nav-links{gap:24px}
       .nav-links a{font-size:14px;padding:8px 4px}
-
-      .hero{padding:140px 24px 80px}
-      .section-title h2{font-size:32px}
-
-      .features-grid{grid-template-columns:repeat(3,1fr)}
-
-      .pricing-grid{grid-template-columns:repeat(3,1fr)}
-
+      .hero{padding:150px 24px 90px}
+      .section-title h2{font-size:34px}
+      .features-grid{grid-template-columns:repeat(2,1fr)}
+      .pricing-table thead .plan-price{font-size:36px}
       footer{padding:40px 24px}
     }
 
     /* ========================================
        ACCESSIBILITY & INTERACTION
        ======================================== */
-    /* Focus-visible outlines for keyboard navigation */
     .btn:focus-visible,.nav-links a:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
-    /* Remove hover transforms on touch devices to avoid sticky hover states */
     @media(hover:none){
-      .feature-card:hover{transform:none}
-      .btn-primary:hover{transform:none}
+      .feature-card:hover{transform:none;box-shadow:none}
+      .feature-card:hover::before{opacity:0}
+      .btn-primary:hover,.btn-glow:hover{transform:none}
     }
-    /* Reduce motion for users who prefer it */
     @media(prefers-reduced-motion:reduce){
       html{scroll-behavior:auto}
-      .feature-card,.btn,.btn-primary,.price-card{transition:none}
+      .feature-card,.btn,.btn-primary,.btn-glow,.intg-card{transition:none}
+      .hero-bg .orb{display:none}
+      .flow-arrow svg{animation:none;opacity:0.3}
     }
   </style>
 </head>
 <body>
   <!-- Navigation -->
-  <nav>
+  <nav aria-label="Main navigation">
     <div class="nav-inner">
-      <a href="/" class="nav-logo">
-        <svg viewBox="0 0 36 36" fill="none">
-          <rect x="2" y="2" width="32" height="32" rx="8" fill="#6366f1" opacity="0.15" stroke="#6366f1" stroke-width="1.5"/>
-          <circle cx="18" cy="18" r="12" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.3"/>
-          <circle cx="18" cy="18" r="7" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.6"/>
-          <circle cx="18" cy="18" r="2.5" fill="#6366f1"/>
-          <line x1="18" y1="5" x2="18" y2="31" stroke="#6366f1" stroke-width="1.2"/>
-          <line x1="5" y1="18" x2="31" y2="18" stroke="#6366f1" stroke-width="1.2"/>
-          <line x1="8.8" y1="8.8" x2="27.2" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
-          <line x1="27.2" y1="8.8" x2="8.8" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
-        </svg>
+      <a href="/" class="nav-logo" aria-label="Shelob Web home">
+        <img src="/images/sw_logo.png" alt="" width="32" height="32" aria-hidden="true" style="border-radius:6px">
         Shelob Web
       </a>
       <div class="nav-links">
         <a href="#features">Features</a>
+        <a href="#integrations">Integrations</a>
         <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
         <a href="/login" class="btn btn-outline">Sign In</a>
-        <a href="/login" class="btn btn-primary">Get Started Free</a>
+        <a href="/login" class="btn btn-primary">Get Started</a>
       </div>
     </div>
   </nav>
 
-  <!-- Hero -->
-  <section class="hero">
-    <div class="hero-badge">🕸️ We watch your web so you don't have to</div>
-    <h1>Monitor Your Website Health in One Dashboard</h1>
-    <p>Track SEO issues, Core Web Vitals, accessibility problems, and broken links across all your websites. Get instant results when you add a site, then automated daily audits.</p>
-    <div class="hero-cta">
-      <a href="/login" class="btn btn-primary">Get Started Free <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M5 12h14M12 5l7 7-7 7"/></svg></a>
-      <a href="#features" class="btn btn-outline">See Features</a>
+  <main>
+    <!-- Hero -->
+    <div class="hero-wrap">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="hero-grid"></div>
+      </div>
+      <section class="hero">
+        <div class="hero-badge" aria-hidden="true">We watch your web so you don't have to</div>
+        <h1>Monitor Your <span class="gradient">Website Health</span> <span class="nb">in One Dashboard</span></h1>
+        <p>Track SEO issues, Core Web Vitals, accessibility, AI readiness, and broken links across all your sites. Daily automated audits with AI-powered fix suggestions.</p>
+        <div class="hero-cta">
+          <a href="/login" class="btn btn-glow">Start Free Trial <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px"><path d="M5 12h14M12 5l7 7-7 7"/></svg></a>
+          <a href="#features" class="btn btn-outline">See Features</a>
+        </div>
+        <p class="hero-sub">7-day free trial &middot; No credit card required &middot; 1 website included</p>
+      </section>
     </div>
-    <p class="hero-sub">7-day free trial · No credit card required · 5 websites included</p>
-  </section>
 
-  <!-- Features -->
-  <section class="section" id="features">
-    <div class="section-title">
-      <h2>Everything you need to monitor site health</h2>
-      <p>Add your website and get instant insights. We check your pages daily and alert you when something breaks.</p>
-    </div>
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon fi-seo">🔍</div>
-        <h3>SEO Auditing</h3>
-        <p>Automatic checks for titles, meta descriptions, H1 tags, schema markup, canonicals, and Open Graph tags across every page.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-perf">⚡</div>
-        <h3>Core Web Vitals</h3>
-        <p>Track LCP, INP, CLS, FCP, and TTFB using real Chrome User Experience data. Monitor performance trends over time.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-a11y">♿</div>
-        <h3>Accessibility Checks</h3>
-        <p>Catch missing alt text, empty links, form label issues, heading hierarchy problems, and missing skip navigation.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-links">🔗</div>
-        <h3>Broken Link Detection</h3>
-        <p>Crawl your sitemap to find internal broken links. Track when they were first seen and when they get fixed.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-gsc">📊</div>
-        <h3>Search Console Integration</h3>
-        <p>Connect Google Search Console to see keyword rankings, clicks, impressions, and position changes — all in one view.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-cf">🌐</div>
-        <h3>Cloudflare Analytics</h3>
-        <p>Add your Cloudflare API token to monitor traffic, cache hit ratios, error rates, and bandwidth across your zones.</p>
-      </div>
-    </div>
-  </section>
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
 
-  <!-- How it works -->
-  <section class="section">
-    <div class="section-title">
-      <h2>Up and running in 60 seconds</h2>
-      <p>No complex setup. No code changes. Just add your domain and start monitoring.</p>
+    <!-- Features -->
+    <div class="section-glow-wrap glow-purple">
+    <section class="section" id="features">
+      <div class="section-title">
+        <span class="tag">Features</span>
+        <h2>Everything you need to monitor site health</h2>
+        <p>Add your website and get instant insights. Nightly crawls check every page and surface new issues on your dashboard each morning.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon fi-seo" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </div>
+          <h3>SEO Auditing</h3>
+          <p>Full-site crawls check titles, meta descriptions, H1 tags, schema markup, canonicals, Open Graph tags, and image optimization across every page in your sitemap.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-perf" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <h3>Core Web Vitals</h3>
+          <p>Track LCP, INP, CLS, FCP, and TTFB with real Chrome User Experience data or Lighthouse lab data. Monitor performance scores and trends over time with historical charts.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-a11y" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="4.5" r="2.5"/><path d="M12 7v5m-4 7l2.5-5h3L16 19M6 10h12"/></svg>
+          </div>
+          <h3>Accessibility Checks</h3>
+          <p>Powered by Lighthouse axe-core. Catch missing alt text, empty links, form label issues, heading hierarchy problems, color contrast, and skip navigation across every page.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-ai" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2" stroke-linecap="round"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 13.44A5 5 0 0 0 12 22a5 5 0 0 0 3.44-8.56"/><circle cx="12" cy="12" r="1"/><path d="M17 6h4M3 18h4M20 18h1M3 6h1"/></svg>
+          </div>
+          <h3>AI Readiness Scoring</h3>
+          <p>Measure how well your site works with AI search and chatbots. Checks llms.txt files, AI bot access in robots.txt, structured data depth, content clarity, and CSR detection.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-fix" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <h3>AI-Powered Fix Suggestions</h3>
+          <p>Get specific, actionable code fixes generated by AI for every SEO, accessibility, and AI readiness issue. One click to see exactly what to change and where.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-links" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+          <h3>Broken Link Detection</h3>
+          <p>Crawl your entire sitemap to find internal broken links and 404 errors. Track when they first appeared and monitor Cloudflare 404 error rates.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-gsc" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          </div>
+          <h3>Keyword Tracking</h3>
+          <p>See your top search keywords, clicks, impressions, CTR, and position changes from Google Search Console. Discover ranking opportunities for keywords on the cusp of page one.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-ga4" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3>User Analytics</h3>
+          <p>Connect Google Analytics 4 to see sessions, bounce rate, engagement rate, page views, average session duration, and your top-performing pages.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-team" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3>Team Collaboration</h3>
+          <p>Invite team members to share your dashboard. Admins manage sites and billing while members monitor and track issues across all properties.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon fi-cf" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3>Cloudflare Analytics</h3>
+          <p>Connect your Cloudflare API token to monitor traffic, cache hit ratios, error rates, bandwidth, response code distribution, and threat activity.</p>
+        </div>
+      </div>
+    </section>
     </div>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
-        <h3>Add your website</h3>
-        <p>Enter your domain name. We'll instantly crawl your homepage and check for SEO, performance, and accessibility issues.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">2</div>
-        <h3>See instant results</h3>
-        <p>Within seconds, get a complete health report: SEO score, Core Web Vitals, accessibility issues, and more.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">3</div>
-        <h3>Monitor daily</h3>
-        <p>We run full-site audits every night. Track trends, get alerts when issues appear, and celebrate when they're fixed.</p>
-      </div>
-    </div>
-  </section>
 
-  <!-- Pricing -->
-  <section class="section" id="pricing">
-    <div class="section-title">
-      <h2>Simple, transparent pricing</h2>
-      <p>Start free for 7 days. Upgrade when you're ready.</p>
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
+
+    <!-- Issue Tracking -->
+    <div class="section-glow-wrap glow-blue">
+    <section class="section">
+      <div class="section-title">
+        <span class="tag">Workflow</span>
+        <h2>Track issues from detection to resolution</h2>
+        <p>Every issue is tracked through its full lifecycle. Mark issues as fixed, and we'll tell you if they come back.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num" aria-hidden="true">1</div>
+          <h3>Detected in nightly crawls</h3>
+          <p>Automated nightly crawls check every page in your sitemap for SEO, accessibility, and AI readiness issues. New issues appear on your dashboard the next morning.</p>
+        </div>
+        <div class="step">
+          <div class="step-num" aria-hidden="true">2</div>
+          <h3>Fix with AI guidance</h3>
+          <p>Get AI-generated code suggestions for each issue. See exactly what to change with copy-paste-ready fixes.</p>
+        </div>
+        <div class="step">
+          <div class="step-num" aria-hidden="true">3</div>
+          <h3>Mark complete and monitor</h3>
+          <p>Mark issues as fixed on your dashboard. If an issue reappears in a future crawl, it's automatically flagged as reactivated so you can see what came back.</p>
+        </div>
+      </div>
+    </section>
     </div>
-    <div class="pricing-grid">
-      <div class="price-card">
-        <h3>Trial</h3>
-        <div class="price">Free</div>
-        <div class="period">for 7 days</div>
-        <ul>
-          <li>Up to 5 websites</li>
-          <li>Daily automated audits</li>
-          <li>SEO, performance, accessibility checks</li>
-          <li>Google Search Console integration</li>
-          <li>Core Web Vitals tracking</li>
-        </ul>
-        <a href="/login" class="btn btn-outline">Start Free Trial</a>
+
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
+
+    <!-- Integrations -->
+    <div class="section-glow-wrap glow-green">
+    <section class="section" id="integrations">
+      <div class="section-title">
+        <span class="tag">Integrations</span>
+        <h2>Connects to the tools you already use</h2>
+        <p>One-click OAuth for Google services. API token for Cloudflare. All your data in one place.</p>
       </div>
-      <div class="price-card featured">
-        <div class="price-badge">Most Popular</div>
-        <h3>Pro</h3>
-        <div class="price">$29<span>/mo</span></div>
-        <div class="period">billed monthly</div>
-        <ul>
-          <li>Up to 5 websites</li>
-          <li>Everything in Trial</li>
-          <li>Cloudflare analytics integration</li>
-          <li>Google Analytics (GA4) data</li>
-          <li>Priority support</li>
-        </ul>
-        <a href="/login" class="btn btn-primary">Get Started</a>
+      <div class="integrations-row">
+        <div class="intg-card">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          <h4>Google Analytics 4</h4>
+          <p>Sessions, bounce rate, engagement, top pages</p>
+        </div>
+        <div class="intg-card">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          <h4>Search Console</h4>
+          <p>Keywords, rankings, clicks, indexing status</p>
+        </div>
+        <div class="intg-card">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16.5 9.4l-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" stroke="#f59e0b" stroke-width="1.5"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" stroke="#f59e0b" stroke-width="1.5"/></svg>
+          <h4>Cloudflare</h4>
+          <p>Traffic, cache, errors, bandwidth, threats</p>
+        </div>
+        <div class="intg-card">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" stroke="#818cf8" stroke-width="1.5"/><path d="M12 6v6l4 2" stroke="#818cf8" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h4>Google Lighthouse</h4>
+          <p>Performance, SEO, accessibility scores</p>
+        </div>
       </div>
-      <div class="price-card">
-        <h3>Agency</h3>
-        <div class="price">$59<span>/mo</span></div>
-        <div class="period">billed monthly</div>
-        <ul>
-          <li>Up to 25 websites</li>
-          <li>Everything in Pro</li>
-          <li>Multi-client management</li>
-          <li>White-label reports (coming soon)</li>
-          <li>Priority support</li>
-        </ul>
-        <a href="/login" class="btn btn-outline">Get Started</a>
-      </div>
+    </section>
     </div>
-  </section>
+
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
+
+    <!-- How it works -->
+    <div class="section-glow-wrap glow-orange">
+    <section class="section">
+      <div class="section-title">
+        <span class="tag">Getting Started</span>
+        <h2>Up and running in 60 seconds</h2>
+        <p>No complex setup. No code changes. No scripts to install. Just add your domain and start monitoring.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num" aria-hidden="true">1</div>
+          <h3>Add your website</h3>
+          <p>Enter your domain name. We instantly crawl your homepage and check for SEO, performance, accessibility, and AI readiness issues.</p>
+        </div>
+        <div class="step">
+          <div class="step-num" aria-hidden="true">2</div>
+          <h3>Connect your tools</h3>
+          <p>One-click Google OAuth connects Analytics and Search Console. Add your Cloudflare API token for traffic data. GA4 property auto-detects.</p>
+        </div>
+        <div class="step">
+          <div class="step-num" aria-hidden="true">3</div>
+          <h3>Check in each morning</h3>
+          <p>Full-site audits run automatically every night. Your dashboard updates with the latest results each morning — review trends, spot new issues, and track fixes across all your sites.</p>
+        </div>
+      </div>
+    </section>
+    </div>
+
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
+
+    <!-- Pricing -->
+    <div class="section-glow-wrap glow-purple">
+    <section class="section" id="pricing">
+      <div class="section-title">
+        <span class="tag">Pricing</span>
+        <h2>Simple, transparent pricing</h2>
+        <p>Start free for 7 days. Upgrade when you're ready.</p>
+      </div>
+      <div class="pricing-table-wrap">
+        <table class="pricing-table" role="table">
+          <thead>
+            <tr>
+              <th scope="col"><span class="sr-only">Feature</span></th>
+              <th scope="col">
+                <span class="plan-name">Trial</span>
+                <span class="plan-price">Free</span>
+                <span class="plan-period">7 days</span>
+              </th>
+              <th scope="col">
+                <span class="plan-name">Pro</span>
+                <span class="plan-price">$29<span>/mo</span></span>
+                <span class="plan-period">billed monthly</span>
+              </th>
+              <th scope="col">
+                <span class="plan-name">Agency</span>
+                <span class="plan-price">$59<span>/mo</span></span>
+                <span class="plan-period">billed monthly</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="cat-row"><td colspan="4">Core Features</td></tr>
+            <tr><td>Websites</td><td>1</td><td>Up to 5</td><td>Up to 25</td></tr>
+            <tr><td>Daily automated audits</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>SEO auditing</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Core Web Vitals</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Accessibility checks</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Broken link detection</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Performance trend charts</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr class="cat-row"><td colspan="4">AI &amp; Insights</td></tr>
+            <tr><td>AI readiness scoring</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>AI-powered fix suggestions</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Keyword tracking &amp; opportunities</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr class="cat-row"><td colspan="4">Integrations</td></tr>
+            <tr><td>Google Analytics 4</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Google Search Console</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Cloudflare analytics</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr class="cat-row"><td colspan="4">Collaboration &amp; Export</td></tr>
+            <tr><td>Team invites</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Role-based access control</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
+            <tr><td>CSV export</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Priority support</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td></td>
+              <td><a href="/login" class="btn btn-outline" style="font-size:13px">Start Free Trial</a></td>
+              <td><a href="/login" class="btn btn-glow" style="font-size:13px">Get Started</a></td>
+              <td><a href="/login" class="btn btn-outline" style="font-size:13px">Get Started</a></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+    </div>
+
+    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+    <div class="section-divider" aria-hidden="true"></div>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="section-title">
+        <span class="tag">FAQ</span>
+        <h2>Frequently asked questions</h2>
+      </div>
+      <div class="faq-list">
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a1" id="faq-q1">What does Shelob Web monitor?</button>
+          <div class="faq-a" id="faq-a1" role="region" aria-labelledby="faq-q1">Shelob Web monitors SEO health, Core Web Vitals performance, accessibility compliance, AI readiness, and broken links across all your websites. It integrates with Google Analytics 4, Google Search Console, and Cloudflare for comprehensive insights.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a2" id="faq-q2">How do automated audits work?</button>
+          <div class="faq-a" id="faq-a2" role="region" aria-labelledby="faq-q2">After you add a website, we run an instant audit of your homepage. Then a full-site crawl runs automatically every night, checking every page in your sitemap for SEO issues, accessibility problems, broken links, and AI readiness signals. Your dashboard updates each morning with the latest results.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a3" id="faq-q3">What is AI readiness scoring?</button>
+          <div class="faq-a" id="faq-a3" role="region" aria-labelledby="faq-q3">AI readiness scoring measures how well your website works with AI search engines and chatbots like ChatGPT, Perplexity, Google AI Overviews, and Claude. It checks for llms.txt files, AI bot access in robots.txt, structured data depth, content clarity, and client-side rendering issues that can hide your content from AI crawlers.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a4" id="faq-q4">What is Answer Engine Optimization (AEO)?</button>
+          <div class="faq-a" id="faq-a4" role="region" aria-labelledby="faq-q4">Answer Engine Optimization (AEO) is the practice of structuring your website so AI answer engines — like ChatGPT, Perplexity, Google AI Overviews, and Claude — can find, understand, and cite your content. Where traditional SEO optimizes for ranked links, AEO optimizes for being quoted directly in AI-generated answers. Shelob Web measures your AEO signals: FAQ and structured data markup, llms.txt presence, AI crawler access, concise answer formatting, author and date signals, and server-side rendered content.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a5" id="faq-q5">How is AEO different from SEO?</button>
+          <div class="faq-a" id="faq-a5" role="region" aria-labelledby="faq-q5">SEO (Search Engine Optimization) aims to rank your pages in traditional search results so users click through to your site. AEO (Answer Engine Optimization) aims to get your content extracted and cited inside AI-generated answers, where there may be no click at all. They overlap — clean structured data and fast, crawlable pages help both — but AEO adds requirements like llms.txt files, explicit AI bot permissions, FAQ schema, and content written in clear, self-contained answers. Shelob Web scores both.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a6" id="faq-q6">How much does Shelob Web cost?</button>
+          <div class="faq-a" id="faq-a6" role="region" aria-labelledby="faq-q6">Shelob Web offers a free 7-day trial with one website and no credit card required. The Pro plan is $29 per month for up to 5 websites with all integrations, AI readiness scoring, and AI fix suggestions. The Agency plan is $59 per month for up to 25 websites, team invites with role-based access control, CSV export, and priority support.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a7" id="faq-q7">Do I need to install anything?</button>
+          <div class="faq-a" id="faq-a7" role="region" aria-labelledby="faq-q7">No. Shelob Web is fully cloud-based. There is no code to install, no scripts to add, and no plugins required. Just enter your domain and start monitoring.</div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="faq-a8" id="faq-q8">Can I invite my team?</button>
+          <div class="faq-a" id="faq-a8" role="region" aria-labelledby="faq-q8">Yes. On the Agency plan, you can invite team members via email with role-based access control. Admins have full control over sites and billing, while members can view the dashboard and track issues across all properties.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Banner -->
+    <section class="cta-banner">
+      <div class="inner">
+        <h2>Ready to improve your site health?</h2>
+        <p>Start monitoring in under a minute. No credit card, no scripts to install, no commitment.</p>
+        <a href="/login" class="btn btn-glow" style="padding:14px 32px;font-size:16px">Start Your Free Trial <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px"><path d="M5 12h14M12 5l7 7-7 7"/></svg></a>
+      </div>
+    </section>
+  </main>
+
+  <!-- FAQ accordion + scroll reveal -->
+  <script>
+    // FAQ accordion (accessible — buttons with aria-expanded)
+    document.querySelectorAll('.faq-q').forEach(function(q){
+      q.addEventListener('click',function(){
+        var item=q.parentElement;
+        var wasOpen=item.classList.contains('open');
+        // Close all
+        document.querySelectorAll('.faq-item.open').forEach(function(i){i.classList.remove('open');var b=i.querySelector('.faq-q');if(b)b.setAttribute('aria-expanded','false')});
+        // Toggle clicked
+        if(!wasOpen){item.classList.add('open');q.setAttribute('aria-expanded','true')}
+      });
+    });
+    // Open first FAQ by default
+    var firstFaq=document.querySelector('.faq-item');
+    if(firstFaq){firstFaq.classList.add('open');var fb=firstFaq.querySelector('.faq-q');if(fb)fb.setAttribute('aria-expanded','true')}
+  </script>
 
   <!-- Footer -->
   <footer>
@@ -316,7 +788,9 @@
       <div class="footer-links">
         <a href="/">Home</a>
         <a href="#features">Features</a>
+        <a href="#integrations">Integrations</a>
         <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
         <a href="/help">Help</a>
         <a href="/policies">Privacy & Terms</a>
         <a href="/login">Sign In</a>

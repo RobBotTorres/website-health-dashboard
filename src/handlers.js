@@ -157,11 +157,13 @@ export async function handleSiteHealth(request, env, user) {
       }
     }
 
+    // No data yet — use no-cache so refreshes always check
+    const noCacheHeaders = { ...headers, 'Cache-Control': 'no-cache' };
     return new Response(JSON.stringify({
       hasData: false,
-      message: 'No audit data yet. Add this website and run an audit to get started.',
+      message: 'Your audit is running now. Refresh in a moment to see results.',
       robotsTxt: await checkRobotsTxt(domain)
-    }), { headers });
+    }), { headers: noCacheHeaders });
 
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
@@ -222,9 +224,23 @@ export async function handlePerformance(request, env, user) {
         const snapshotTime = new Date(cached.snapshotDate + 'T00:00:00Z').getTime();
         const ageHours = (Date.now() - snapshotTime) / (1000 * 60 * 60);
         if (ageHours < 24) {
-          return new Response(JSON.stringify({ ...cached, fromCache: true }), { headers });
+          // Check if cached data is missing GA4 but property now has GA4 configured
+          const cachedMissingGA4 = cached.ga4?.error || !cached.ga4?.sessions;
+          let ga4NowConfigured = false;
+          if (cachedMissingGA4 && user?.userId) {
+            const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
+            if (property?.ga4_property_id) {
+              ga4NowConfigured = true;
+            }
+          }
+          if (!ga4NowConfigured) {
+            return new Response(JSON.stringify({ ...cached, fromCache: true }), { headers });
+          }
+          // GA4 was recently configured — fall through to live fetch
+          staleCache = cached;
+        } else {
+          staleCache = cached;
         }
-        staleCache = cached;
       }
     }
 
@@ -319,25 +335,21 @@ export async function handleSEOStats(domain, env, user) {
 
   try {
     const { startDate: weekAgo } = getDateRangePST(7);
-    const userId = user?.userId;
 
-    // Build user_id filter clause
-    const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-    const userBind = userId || '';
-
+    // Domain-scoped queries: show audit data for the domain regardless of which user triggered the audit
     const stats = await env.DB.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at IS NULL ${userFilter}) as open_issues,
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at >= ? ${userFilter}) as fixed_this_week,
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL ${userFilter}) as new_this_week,
-        (SELECT COUNT(*) FROM broken_links WHERE domain = ? AND fixed_at IS NULL ${userFilter}) as broken_links,
-        (SELECT audit_date FROM audits WHERE domain = ? ${userFilter} ORDER BY audit_date DESC LIMIT 1) as last_audit
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at IS NULL) as open_issues,
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at >= ?) as fixed_this_week,
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL) as new_this_week,
+        (SELECT COUNT(*) FROM broken_links WHERE domain = ? AND fixed_at IS NULL) as broken_links,
+        (SELECT audit_date FROM audits WHERE domain = ? ORDER BY audit_date DESC LIMIT 1) as last_audit
     `).bind(
-      domain, userBind,
-      domain, weekAgo, userBind,
-      domain, weekAgo, userBind,
-      domain, userBind,
-      domain, userBind
+      domain,
+      domain, weekAgo,
+      domain, weekAgo,
+      domain,
+      domain
     ).first();
 
     const topIssues = await env.DB.prepare(`
@@ -348,14 +360,15 @@ export async function handleSEOStats(domain, env, user) {
              GROUP_CONCAT(id, '|||') as ids,
              GROUP_CONCAT(COALESCE(manually_fixed_at,''), '|||') as manually_fixed_ats,
              GROUP_CONCAT(COALESCE(manually_fixed_by,''), '|||') as manually_fixed_bys,
-             GROUP_CONCAT(COALESCE(reactivated_at,''), '|||') as reactivated_ats
+             GROUP_CONCAT(COALESCE(reactivated_at,''), '|||') as reactivated_ats,
+             GROUP_CONCAT(COALESCE(ai_suggestion,''), '|||') as ai_suggestions
       FROM issues
-      WHERE domain = ? AND fixed_at IS NULL ${userFilter}
+      WHERE domain = ? AND fixed_at IS NULL
       GROUP BY issue_type, severity
       ORDER BY
         CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
         count DESC
-    `).bind(weekAgo, domain, userBind).all();
+    `).bind(weekAgo, domain).all();
 
     const fixedIssues = await env.DB.prepare(`
       SELECT issue_type, severity, COUNT(*) as count, fixed_at,
@@ -365,19 +378,19 @@ export async function handleSEOStats(domain, env, user) {
              GROUP_CONCAT(COALESCE(manually_fixed_at,''), '|||') as manually_fixed_ats,
              GROUP_CONCAT(COALESCE(manually_fixed_by,''), '|||') as manually_fixed_bys
       FROM issues
-      WHERE domain = ? AND fixed_at >= ? ${userFilter}
+      WHERE domain = ? AND fixed_at >= ?
       GROUP BY issue_type, severity
       ORDER BY fixed_at DESC
-    `).bind(domain, weekAgo, userBind).all();
+    `).bind(domain, weekAgo).all();
 
     // Fetch reactivated issues (were marked complete but came back in a crawl)
     const reactivatedIssues = await env.DB.prepare(`
       SELECT id, issue_type, severity, page_url, page_path, reactivated_at, manually_fixed_at, manually_fixed_by
       FROM issues
-      WHERE domain = ? AND reactivated_at IS NOT NULL AND manually_fixed_at IS NOT NULL AND fixed_at IS NULL ${userFilter}
+      WHERE domain = ? AND reactivated_at IS NOT NULL AND manually_fixed_at IS NOT NULL AND fixed_at IS NULL
       ORDER BY reactivated_at DESC
       LIMIT 20
-    `).bind(domain, userBind).all();
+    `).bind(domain).all();
 
     return new Response(JSON.stringify({
       hasData: stats?.last_audit ? true : false,
@@ -394,7 +407,8 @@ export async function handleSEOStats(domain, env, user) {
         ids: i.ids ? i.ids.split('|||').map(Number) : [],
         manuallyFixedAts: i.manually_fixed_ats ? i.manually_fixed_ats.split('|||') : [],
         manuallyFixedBys: i.manually_fixed_bys ? i.manually_fixed_bys.split('|||') : [],
-        reactivatedAts: i.reactivated_ats ? i.reactivated_ats.split('|||') : []
+        reactivatedAts: i.reactivated_ats ? i.reactivated_ats.split('|||') : [],
+        aiSuggestions: i.ai_suggestions ? i.ai_suggestions.split('|||') : []
       })),
       fixedIssues: fixedIssues.results.map(i => ({
         type: i.issue_type, severity: i.severity, count: i.count,
@@ -437,19 +451,16 @@ export async function handleAccessibility(domain, env, user) {
 
   try {
     const { startDate: weekAgo } = getDateRangePST(7);
-    const userId = user?.userId;
-    const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-    const userBind = userId || '';
 
     const issues = await env.DB.prepare(`
-      SELECT id, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen,
-             manually_fixed_at, manually_fixed_by, reactivated_at
+      SELECT id, issue_type, severity, page_path, page_url, issue_count, first_seen,
+             manually_fixed_at, manually_fixed_by, reactivated_at, ai_suggestion
       FROM accessibility_issues
-      WHERE domain = ? AND fixed_at IS NULL ${userFilter}
+      WHERE domain = ? AND fixed_at IS NULL
       ORDER BY
         CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
         issue_type, page_path
-    `).bind(domain, userBind).all();
+    `).bind(domain).all();
 
     const falsePositiveIds = [];
 
@@ -490,7 +501,8 @@ export async function handleAccessibility(domain, env, user) {
         count: row.issue_count || 1, snippets: snippets,
         manuallyFixedAt: row.manually_fixed_at || null,
         manuallyFixedBy: row.manually_fixed_by || null,
-        reactivatedAt: row.reactivated_at || null
+        reactivatedAt: row.reactivated_at || null,
+        aiSuggestion: row.ai_suggestion || null
       });
     }
 
@@ -527,10 +539,10 @@ export async function handleAccessibility(domain, env, user) {
     const reactivatedA11y = await env.DB.prepare(`
       SELECT id, issue_type, severity, page_url, page_path, reactivated_at, manually_fixed_at, manually_fixed_by
       FROM accessibility_issues
-      WHERE domain = ? AND reactivated_at IS NOT NULL AND manually_fixed_at IS NOT NULL AND fixed_at IS NULL ${userFilter}
+      WHERE domain = ? AND reactivated_at IS NOT NULL AND manually_fixed_at IS NOT NULL AND fixed_at IS NULL
       ORDER BY reactivated_at DESC
       LIMIT 20
-    `).bind(domain, userBind).all();
+    `).bind(domain).all();
 
     return new Response(JSON.stringify({
       hasData: issueList.length > 0 || (lighthouse && lighthouse.score !== null),
@@ -550,26 +562,188 @@ export async function handleAccessibility(domain, env, user) {
   }
 }
 
+// ============================================================================
+// AI READINESS HANDLER
+// ============================================================================
+
+export async function handleAIReadiness(domain, env, user) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-cache'
+  };
+
+  if (!domain || !env.DB) {
+    return new Response(JSON.stringify({ hasData: false }), { headers });
+  }
+
+  try {
+    const { startDate: weekAgo } = getDateRangePST(7);
+
+    // Domain-level data
+    const domainData = await env.DB.prepare(`
+      SELECT * FROM ai_readiness WHERE domain = ? ORDER BY audit_date DESC LIMIT 1
+    `).bind(domain).first();
+
+    // Page-level issues
+    const issues = await env.DB.prepare(`
+      SELECT id, issue_type, severity, page_path, page_url, details, first_seen,
+             manually_fixed_at, manually_fixed_by, reactivated_at, ai_suggestion
+      FROM ai_readiness_issues
+      WHERE domain = ? AND fixed_at IS NULL
+      ORDER BY
+        CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+        issue_type, page_path
+    `).bind(domain).all();
+
+    const grouped = {};
+    for (const row of issues.results || []) {
+      if (!grouped[row.issue_type]) {
+        grouped[row.issue_type] = {
+          type: row.issue_type, severity: row.severity,
+          count: 0, pageCount: 0, newThisWeek: 0, pages: []
+        };
+      }
+      grouped[row.issue_type].pageCount++;
+      grouped[row.issue_type].count++;
+      if (row.first_seen >= weekAgo) grouped[row.issue_type].newThisWeek++;
+
+      let details = {};
+      if (row.details) { try { details = JSON.parse(row.details); } catch(e) {} }
+
+      grouped[row.issue_type].pages.push({
+        id: row.id, url: row.page_url, path: row.page_path,
+        details,
+        manuallyFixedAt: row.manually_fixed_at || null,
+        manuallyFixedBy: row.manually_fixed_by || null,
+        reactivatedAt: row.reactivated_at || null,
+        aiSuggestion: row.ai_suggestion || null
+      });
+    }
+
+    const issueList = Object.values(grouped)
+      .filter(g => g.pageCount > 0)
+      .map(g => ({ ...g, pages: g.pages.slice(0, 50) }));
+
+    // Reactivated issues
+    const reactivated = await env.DB.prepare(`
+      SELECT id, issue_type, severity, page_url, page_path, reactivated_at, manually_fixed_at, manually_fixed_by
+      FROM ai_readiness_issues
+      WHERE domain = ? AND reactivated_at IS NOT NULL AND manually_fixed_at IS NOT NULL AND fixed_at IS NULL
+      ORDER BY reactivated_at DESC LIMIT 20
+    `).bind(domain).all();
+
+    // Parse domain checks
+    let domainChecks = null;
+    if (domainData) {
+      let aiBotRules = {};
+      try { aiBotRules = JSON.parse(domainData.ai_bot_rules || '{}'); } catch(e) {}
+      domainChecks = {
+        llmsTxt: { exists: !!domainData.llms_txt_exists, quality: domainData.llms_txt_quality || 'missing' },
+        llmsFullTxt: { exists: !!domainData.llms_full_txt_exists },
+        aiBotRules,
+        botsBlocked: domainData.ai_bots_blocked || 0,
+        botsAllowed: domainData.ai_bots_allowed || 0,
+      };
+    }
+
+    // ---- Answer Engine Optimization (AEO) signal breakdown ----
+    // Derived from the same audit data, framed for AI answer engines
+    // (ChatGPT, Perplexity, Google AI Overviews, Claude).
+    const schemaDepth = domainData?.schema_depth_avg || 0;
+    const contentClarity = domainData?.content_clarity_avg || 0;
+    const csrPages = domainData?.csr_pages || 0;
+    const faqOpp = domainData?.faq_opportunity_pages || 0;
+    const botsBlocked = domainChecks?.botsBlocked || 0;
+    const botsAllowed = domainChecks?.botsAllowed || 0;
+    const llmsExists = !!(domainChecks && domainChecks.llmsTxt && domainChecks.llmsTxt.exists);
+
+    const aeoSignals = [
+      {
+        key: 'llms_txt',
+        label: 'llms.txt file',
+        status: llmsExists ? (domainChecks.llmsTxt.quality === 'good' ? 'good' : 'warning') : 'bad',
+        detail: llmsExists
+          ? `Present (${domainChecks.llmsTxt.quality}). Gives AI answer engines a curated map of your content.`
+          : 'Missing. Add /llms.txt so AI answer engines can discover and summarize your site.'
+      },
+      {
+        key: 'ai_crawlers',
+        label: 'AI crawler access',
+        status: botsBlocked === 0 ? 'good' : botsBlocked >= botsAllowed ? 'bad' : 'warning',
+        detail: botsBlocked === 0
+          ? 'All known AI crawlers are allowed in robots.txt.'
+          : `${botsBlocked} AI crawler(s) blocked. Blocked bots cannot cite your content in AI answers.`
+      },
+      {
+        key: 'structured_data',
+        label: 'Structured data depth',
+        status: schemaDepth >= 50 ? 'good' : schemaDepth >= 20 ? 'warning' : 'bad',
+        detail: `Average ${Math.round(schemaDepth)}% schema field coverage. Rich schema helps AI engines understand and quote your content accurately.`
+      },
+      {
+        key: 'faq_schema',
+        label: 'FAQ / Q&A markup',
+        status: faqOpp === 0 ? 'good' : 'warning',
+        detail: faqOpp === 0
+          ? 'No pages with unmarked FAQ content detected.'
+          : `${faqOpp} page(s) have Q&A content without FAQPage schema — a missed answer-engine opportunity.`
+      },
+      {
+        key: 'content_clarity',
+        label: 'Content clarity',
+        status: contentClarity >= 50 ? 'good' : contentClarity >= 30 ? 'warning' : 'bad',
+        detail: `${Math.round(contentClarity)}% content-to-boilerplate ratio. Higher means AI engines extract your actual answers, not navigation.`
+      },
+      {
+        key: 'server_rendered',
+        label: 'Server-rendered content',
+        status: csrPages === 0 ? 'good' : 'bad',
+        detail: csrPages === 0
+          ? 'Content is present in initial HTML — readable by AI crawlers.'
+          : `${csrPages} page(s) rely on client-side rendering. Most AI crawlers cannot run JavaScript and will see an empty page.`
+      }
+    ];
+    const aeoPassing = aeoSignals.filter(s => s.status === 'good').length;
+
+    return new Response(JSON.stringify({
+      hasData: !!domainData || issueList.length > 0,
+      score: domainData?.ai_readiness_score || 0,
+      schemaDepthAvg: domainData?.schema_depth_avg || 0,
+      contentClarityAvg: domainData?.content_clarity_avg || 0,
+      csrPages: domainData?.csr_pages || 0,
+      faqOpportunityPages: domainData?.faq_opportunity_pages || 0,
+      aeoSignals,
+      aeoPassing,
+      aeoTotal: aeoSignals.length,
+      domainChecks,
+      issues: issueList,
+      reactivatedIssues: (reactivated.results || []).map(i => ({
+        id: i.id, type: i.issue_type, severity: i.severity,
+        url: i.page_url, path: i.page_path,
+        reactivatedAt: i.reactivated_at, manuallyFixedAt: i.manually_fixed_at,
+        manuallyFixedBy: i.manually_fixed_by
+      }))
+    }), { headers });
+
+  } catch (e) {
+    console.error('AI Readiness error:', e);
+    return new Response(JSON.stringify({ hasData: false, error: e.message }), { headers });
+  }
+}
+
 /**
  * Get Lighthouse accessibility data — from D1 cache or fresh PSI API call.
  */
 async function getLighthouseA11y(domain, env, user) {
-  const userId = user?.userId;
-
-  // Check D1 cache first (from performance_snapshots)
+  // Check D1 cache first (from performance_snapshots) — domain-scoped
   if (env.DB) {
     try {
-      const row = userId
-        ? await env.DB.prepare(`
-            SELECT lighthouse_a11y, snapshot_date FROM performance_snapshots
-            WHERE domain = ? AND (user_id = ? OR user_id IS NULL) AND lighthouse_a11y IS NOT NULL
-            ORDER BY snapshot_date DESC LIMIT 1
-          `).bind(domain, userId).first()
-        : await env.DB.prepare(`
-            SELECT lighthouse_a11y, snapshot_date FROM performance_snapshots
-            WHERE domain = ? AND lighthouse_a11y IS NOT NULL
-            ORDER BY snapshot_date DESC LIMIT 1
-          `).bind(domain).first();
+      const row = await env.DB.prepare(`
+        SELECT lighthouse_a11y, snapshot_date FROM performance_snapshots
+        WHERE domain = ? AND lighthouse_a11y IS NOT NULL
+        ORDER BY snapshot_date DESC LIMIT 1
+      `).bind(domain).first();
 
       if (row?.lighthouse_a11y) {
         const snapshotTime = new Date(row.snapshot_date + 'T00:00:00Z').getTime();
@@ -608,7 +782,7 @@ async function getLighthouseA11y(domain, env, user) {
             await env.DB.prepare(`
               INSERT OR REPLACE INTO performance_snapshots (domain, snapshot_date, user_id, lighthouse_a11y)
               VALUES (?, ?, ?, ?)
-            `).bind(domain, today, userId || null, JSON.stringify(psiResult.accessibility)).run();
+            `).bind(domain, today, user?.userId || null, JSON.stringify(psiResult.accessibility)).run();
           } catch(e2) { /* ignore */ }
         }
       }
@@ -636,31 +810,26 @@ export async function handleKeywords(domain, env, user) {
     return new Response(JSON.stringify({ hasData: false }), { headers });
   }
 
-  const userId = user?.userId;
-  const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-  const userBind = userId || '';
-
   try {
     const keywords = await env.DB.prepare(`
       SELECT query, clicks, impressions, ctr, position, prev_position, position_change, data_date
       FROM keywords
-      WHERE domain = ? AND data_date = (SELECT MAX(data_date) FROM keywords WHERE domain = ? ${userFilter}) ${userFilter}
+      WHERE domain = ? AND data_date = (SELECT MAX(data_date) FROM keywords WHERE domain = ?)
       ORDER BY clicks DESC
       LIMIT 30
-    `).bind(domain, domain, userBind, userBind).all();
+    `).bind(domain, domain).all();
 
     const opportunities = await env.DB.prepare(`
       SELECT query, clicks, impressions, ctr, position, prev_position, position_change
       FROM keywords
       WHERE domain = ?
-        AND data_date = (SELECT MAX(data_date) FROM keywords WHERE domain = ? ${userFilter})
+        AND data_date = (SELECT MAX(data_date) FROM keywords WHERE domain = ?)
         AND position >= 5
         AND position <= 30
         AND impressions >= 50
-        ${userFilter}
       ORDER BY impressions DESC
       LIMIT 50
-    `).bind(domain, domain, userBind, userBind).all();
+    `).bind(domain, domain).all();
 
     if (!keywords.results?.length) {
       return new Response(JSON.stringify({ hasData: false }), { headers });
@@ -888,19 +1057,15 @@ export async function handleAllFixedIssues(env, user) {
   }
 
   try {
-    const userId = user?.userId;
-    const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-    const userBind = userId || '';
-
     const allFixed = await env.DB.prepare(`
       SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at, 'SEO' as category
-      FROM issues WHERE fixed_at IS NOT NULL ${userFilter}
+      FROM issues WHERE fixed_at IS NOT NULL
       UNION ALL
       SELECT domain, issue_type, severity, page_path, page_url, first_seen, fixed_at, 'Accessibility' as category
-      FROM accessibility_issues WHERE fixed_at IS NOT NULL ${userFilter}
+      FROM accessibility_issues WHERE fixed_at IS NOT NULL
       ORDER BY fixed_at DESC
       LIMIT 500
-    `).bind(userBind, userBind).all();
+    `).bind().all();
 
     return new Response(JSON.stringify({
       hasData: (allFixed.results?.length || 0) > 0,
@@ -1018,13 +1183,11 @@ async function resolveCredentials(propertyId, env, user) {
 
 async function getActionableDataFromD1(db, domain, userId) {
   const { startDate: weekAgo, endDate: today } = getDateRangePST(7);
-  const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-  const userBind = userId || '';
 
   const latestAudit = await db.prepare(`
     SELECT audit_date, total_pages, pages_audited, duration_seconds
-    FROM audits WHERE domain = ? ${userFilter} ORDER BY audit_date DESC LIMIT 1
-  `).bind(domain, userBind).first();
+    FROM audits WHERE domain = ? ORDER BY audit_date DESC LIMIT 1
+  `).bind(domain).first();
 
   if (!latestAudit) {
     return { hasData: false };
@@ -1035,54 +1198,56 @@ async function getActionableDataFromD1(db, domain, userId) {
            GROUP_CONCAT(page_url, '|||') as urls,
            GROUP_CONCAT(page_path, '|||') as paths,
            GROUP_CONCAT(COALESCE(details, ''), '|||') as all_details,
+           GROUP_CONCAT(COALESCE(ai_suggestion, ''), '|||') as ai_suggestions,
            MIN(first_seen) as oldest,
            SUM(CASE WHEN first_seen >= ? THEN 1 ELSE 0 END) as new_this_week
     FROM issues
-    WHERE domain = ? AND fixed_at IS NULL ${userFilter}
+    WHERE domain = ? AND fixed_at IS NULL
     GROUP BY issue_type, severity
     ORDER BY
       CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
       count DESC
-  `).bind(weekAgo, domain, userBind).all();
+  `).bind(weekAgo, domain).all();
 
   const fixedThisWeek = await db.prepare(`
     SELECT COUNT(*) as count FROM issues
-    WHERE domain = ? AND fixed_at >= ? ${userFilter}
-  `).bind(domain, weekAgo, userBind).first();
+    WHERE domain = ? AND fixed_at >= ?
+  `).bind(domain, weekAgo).first();
 
   const newThisWeek = await db.prepare(`
     SELECT COUNT(*) as count FROM issues
-    WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL ${userFilter}
-  `).bind(domain, weekAgo, userBind).first();
+    WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL
+  `).bind(domain, weekAgo).first();
 
   const brokenLinks = await db.prepare(`
     SELECT link_url, link_path, status_code, first_seen, source_path,
            CASE WHEN first_seen >= ? THEN 1 ELSE 0 END as is_new
     FROM broken_links
-    WHERE domain = ? AND fixed_at IS NULL ${userFilter}
+    WHERE domain = ? AND fixed_at IS NULL
     ORDER BY first_seen DESC
     LIMIT 25
-  `).bind(weekAgo, domain, userBind).all();
+  `).bind(weekAgo, domain).all();
 
   const brokenCount = await db.prepare(`
-    SELECT COUNT(*) as count FROM broken_links WHERE domain = ? AND fixed_at IS NULL ${userFilter}
-  `).bind(domain, userBind).first();
+    SELECT COUNT(*) as count FROM broken_links WHERE domain = ? AND fixed_at IS NULL
+  `).bind(domain).first();
 
   const progress = await db.prepare(`
     SELECT
       strftime('%Y-%W', audit_date) as week,
       MAX(audit_date) as date,
-      (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen <= MAX(a.audit_date) AND (fixed_at IS NULL OR fixed_at > MAX(a.audit_date)) ${userFilter}) as open_issues
+      (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen <= MAX(a.audit_date) AND (fixed_at IS NULL OR fixed_at > MAX(a.audit_date))) as open_issues
     FROM audits a
-    WHERE domain = ? AND audit_date >= date('now', '-28 days') ${userFilter}
+    WHERE domain = ? AND audit_date >= date('now', '-28 days')
     GROUP BY week
     ORDER BY week
-  `).bind(domain, userBind, domain, userBind).all();
+  `).bind(domain, domain).all();
 
   const actionItems = openIssues.results.map(i => {
     const paths = i.paths ? i.paths.split('|||').slice(0, 100) : [];
     const urls = i.urls ? i.urls.split('|||').slice(0, 100) : [];
     const details = i.all_details ? i.all_details.split('|||').slice(0, 100) : [];
+    const aiSuggs = i.ai_suggestions ? i.ai_suggestions.split('|||').slice(0, 100) : [];
     const hasValues = ['short_title', 'short_description'].includes(i.issue_type);
     let pages;
     if (hasValues && details.length > 0) {
@@ -1093,10 +1258,10 @@ async function getActionableDataFromD1(db, domain, userId) {
           const d = details[idx] ? JSON.parse(details[idx]) : null;
           if (d && d.value) snippet = `Current ${label} (${d.length} chars): "${d.value}"`;
         } catch(e) {}
-        return { path: p, url: urls[idx] || '', snippets: snippet ? [snippet] : [] };
+        return { path: p, url: urls[idx] || '', snippets: snippet ? [snippet] : [], aiSuggestion: aiSuggs[idx] || null };
       });
     } else {
-      pages = paths;
+      pages = paths.map((p, idx) => ({ path: p, url: urls[idx] || '', snippets: [], aiSuggestion: aiSuggs[idx] || null }));
     }
     return {
       type: i.issue_type, severity: i.severity, count: i.count,
@@ -1135,22 +1300,13 @@ async function getActionableDataFromD1(db, domain, userId) {
 
 async function getPerformanceFromD1(db, domain, userId) {
   try {
-    let row;
-    if (userId) {
-      row = await db.prepare(`
-        SELECT * FROM performance_snapshots
-        WHERE domain = ? AND (user_id = ? OR user_id IS NULL)
-        ORDER BY snapshot_date DESC
-        LIMIT 1
-      `).bind(domain, userId).first();
-    } else {
-      row = await db.prepare(`
-        SELECT * FROM performance_snapshots
-        WHERE domain = ?
-        ORDER BY snapshot_date DESC
-        LIMIT 1
-      `).bind(domain).first();
-    }
+    // Domain-scoped: show performance data regardless of which user triggered the snapshot
+    const row = await db.prepare(`
+      SELECT * FROM performance_snapshots
+      WHERE domain = ?
+      ORDER BY snapshot_date DESC
+      LIMIT 1
+    `).bind(domain).first();
 
     if (!row) return null;
 
@@ -1380,22 +1536,20 @@ export async function fetchSearchConsoleData(propertyId, env, user) {
 async function getSEOStatsFromD1(db, domain, userId) {
   try {
     const { startDate: weekAgo } = getDateRangePST(7);
-    const userFilter = userId ? 'AND user_id = ?' : 'AND (user_id IS NULL OR user_id = ?)';
-    const userBind = userId || '';
 
     const stats = await db.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at IS NULL ${userFilter}) as open_issues,
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at >= ? ${userFilter}) as fixed_this_week,
-        (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL ${userFilter}) as new_this_week,
-        (SELECT COUNT(*) FROM broken_links WHERE domain = ? AND fixed_at IS NULL ${userFilter}) as broken_links,
-        (SELECT audit_date FROM audits WHERE domain = ? ${userFilter} ORDER BY audit_date DESC LIMIT 1) as last_audit
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at IS NULL) as open_issues,
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND fixed_at >= ?) as fixed_this_week,
+        (SELECT COUNT(*) FROM issues WHERE domain = ? AND first_seen >= ? AND fixed_at IS NULL) as new_this_week,
+        (SELECT COUNT(*) FROM broken_links WHERE domain = ? AND fixed_at IS NULL) as broken_links,
+        (SELECT audit_date FROM audits WHERE domain = ? ORDER BY audit_date DESC LIMIT 1) as last_audit
     `).bind(
-      domain, userBind,
-      domain, weekAgo, userBind,
-      domain, weekAgo, userBind,
-      domain, userBind,
-      domain, userBind
+      domain,
+      domain, weekAgo,
+      domain, weekAgo,
+      domain,
+      domain
     ).first();
 
     if (!stats || !stats.last_audit) return null;
@@ -1406,13 +1560,13 @@ async function getSEOStatsFromD1(db, domain, userId) {
              GROUP_CONCAT(page_url, '|||') as urls,
              GROUP_CONCAT(page_path, '|||') as pages
       FROM issues
-      WHERE domain = ? AND fixed_at IS NULL ${userFilter}
+      WHERE domain = ? AND fixed_at IS NULL
       GROUP BY issue_type, severity
       ORDER BY
         CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
         count DESC
       LIMIT 5
-    `).bind(weekAgo, domain, userBind).all();
+    `).bind(weekAgo, domain).all();
 
     return {
       openIssues: stats.open_issues || 0,
@@ -1480,8 +1634,8 @@ export async function handleIssueStatus(issueId, request, env, user) {
     const { table, action } = body;
 
     // Validate table param
-    if (!table || !['issues', 'accessibility_issues'].includes(table)) {
-      return new Response(JSON.stringify({ error: 'Invalid table. Use "issues" or "accessibility_issues".' }), { status: 400, headers });
+    if (!table || !['issues', 'accessibility_issues', 'ai_readiness_issues'].includes(table)) {
+      return new Response(JSON.stringify({ error: 'Invalid table.' }), { status: 400, headers });
     }
 
     // Validate action param

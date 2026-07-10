@@ -6,6 +6,11 @@
 
 // Plan configuration — prices are created in Stripe Dashboard
 const PLANS = {
+  trial: {
+    name: 'Trial',
+    siteLimit: 1,
+    monthlyPrice: 0,
+  },
   pro: {
     name: 'Pro',
     siteLimit: 5,

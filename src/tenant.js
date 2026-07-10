@@ -246,7 +246,7 @@ export async function getPropertyCount(userId, db) {
  */
 export function getPlanLimit(plan) {
   const limits = {
-    trial: 5,
+    trial: 1,
     pro: 5,
     agency: 25
   };

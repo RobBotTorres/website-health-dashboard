@@ -5,6 +5,136 @@ import { fetchCloudflareTraffic } from './cloudflare-api.js';
 import { fetchGA4Analytics } from './google-api.js';
 import { getDateRangePST } from './utils.js';
 
+// Legacy hardcoded domains used when no DB-backed properties are available
+const LEGACY_DOMAINS = [
+  'adairfamilywines.com',
+  'brcohn.com',
+  'clospegase.com',
+  'girardwinery.com',
+  'kunde.com',
+  'viansa.com'
+];
+
+// ============================================================================
+// SHARED HELPERS
+// ============================================================================
+
+// Run an array of prepared D1 statements in chunked batches
+async function runInBatches(db, stmts, size = 25) {
+  for (let i = 0; i < stmts.length; i += size) {
+    await db.batch(stmts.slice(i, i + size));
+  }
+}
+
+// Extract a <meta> tag's content, trying both attribute orders
+function getMetaContent(html, attr, value) {
+  const v = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return html.match(new RegExp(`<meta[^>]*${attr}=["']${v}["'][^>]*content=["']([^"']*)["']`, 'i'))?.[1] ||
+         html.match(new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*${attr}=["']${v}["']`, 'i'))?.[1] || '';
+}
+
+// Parse the <title> tag into { value, length, status }
+function parseTitle(html) {
+  const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const length = title.length;
+  let status = 'good';
+  if (!title) status = 'missing';
+  else if (length < 30) status = 'too_short';
+  else if (length > 60) status = 'too_long';
+  return { value: title.substring(0, 70), length, status };
+}
+
+// Parse the meta description into { value, length, status }
+function parseDescription(html) {
+  const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
+                    html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
+  const description = descMatch ? descMatch[1].trim() : '';
+  const length = description.length;
+  let status = 'good';
+  if (!description) status = 'missing';
+  else if (length < 70) status = 'too_short';
+  else if (length > 160) status = 'too_long';
+  return { value: description.substring(0, 100), length, status };
+}
+
+// Count <h1> tags
+function parseH1(html) {
+  return { count: (html.match(/<h1[^>]*>/gi) || []).length };
+}
+
+// Parse all JSON-LD blocks once, returning schema presence, types, per-type
+// field counts (for AI-readiness depth scoring), and parse-error count.
+function parseJsonLd(html) {
+  const matches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
+  const types = [];
+  const fieldCounts = {};
+  let errors = 0;
+
+  matches.forEach(match => {
+    try {
+      const jsonContent = match.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
+      const parsed = JSON.parse(jsonContent);
+      const items = parsed['@graph'] || [parsed];
+      items.forEach(item => {
+        if (item['@type']) {
+          const itemTypes = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+          types.push(...itemTypes);
+          const typeName = itemTypes[0];
+          fieldCounts[typeName] = Object.keys(item).filter(k => !k.startsWith('@')).length;
+        }
+      });
+    } catch (e) {
+      errors++;
+    }
+  });
+
+  return {
+    found: matches.length > 0,
+    types,
+    uniqueTypes: [...new Set(types)],
+    fieldCounts,
+    errors
+  };
+}
+
+// Pull all <loc> URLs from sitemap XML
+function extractSitemapLocs(xml) {
+  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/gi)].map(m => m[1]);
+}
+
+// Deduplicate URLs by a caller-supplied key; URLs that throw in keyFn are kept.
+// Returns the unique list plus the Set of seen keys.
+function dedupeUrls(urls, keyFn) {
+  const seen = new Set();
+  const unique = [];
+  for (const url of urls) {
+    let key;
+    try {
+      key = keyFn(url);
+    } catch (e) {
+      unique.push(url);
+      continue;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(url);
+    }
+  }
+  return { unique, seen };
+}
+
+// Build the performance_history upsert statement (shared by snapshot + audit flows)
+function performanceHistoryStmt(env, domain, date, cwv, userId, now) {
+  return env.DB.prepare(`
+    INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(domain, date) DO UPDATE SET
+      lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
+      inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
+  `).bind(domain, date, cwv.LCP || null, cwv.FCP || null, cwv.CLS || null, cwv.INP || null, cwv.TTFB || null, now, userId);
+}
+
 // Run full SEO audit for all properties (multi-tenant aware)
 export async function runScheduledAudit(env) {
   // Multi-tenant: query all active properties from DB
@@ -52,14 +182,7 @@ export async function runScheduledAudit(env) {
   }
 
   // Legacy fallback: hardcoded domains
-  const domains = [
-    'adairfamilywines.com',
-    'brcohn.com',
-    'clospegase.com',
-    'girardwinery.com',
-    'kunde.com',
-    'viansa.com'
-  ];
+  const domains = LEGACY_DOMAINS;
 
   console.log(`Starting scheduled SEO audit for ${domains.length} domains (legacy mode)`);
 
@@ -101,10 +224,7 @@ export async function collectPerformanceSnapshot(env) {
 
   // Legacy fallback
   if (domains.length === 0) {
-    domains = [
-      'viansa.com', 'kunde.com', 'brcohn.com',
-      'clospegase.com', 'girardwinery.com', 'adairfamilywines.com'
-    ].map(d => ({ domain: d, userId: null }));
+    domains = LEGACY_DOMAINS.map(d => ({ domain: d, userId: null }));
   }
 
   const { endDate: today } = getDateRangePST(0);
@@ -125,13 +245,7 @@ export async function collectPerformanceSnapshot(env) {
       if (!cwv || cwv.error) continue;
       const userId = batch[j]?.userId || null;
 
-      stmts.push(env.DB.prepare(`
-        INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(domain, date) DO UPDATE SET
-          lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
-          inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
-      `).bind(domain, today, cwv.LCP || null, cwv.FCP || null, cwv.CLS || null, cwv.INP || null, cwv.TTFB || null, now, userId));
+      stmts.push(performanceHistoryStmt(env, domain, today, cwv, userId, now));
 
       console.log(`Stored performance for ${domain}: LCP=${cwv.LCP}ms`);
     }
@@ -175,12 +289,13 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
       `https://www.${domain}/robots.txt`
     ];
     let foundRobots = false;
+    let robotsTxtContent = null;
     for (const robotsUrl of robotsUrls) {
       try {
         const robotsResponse = await fetch(robotsUrl, { redirect: 'follow' });
         if (robotsResponse.ok) {
-          const robotsText = await robotsResponse.text();
-          const sitemapMatch = robotsText.match(/sitemap:\s*(https?:\/\/[^\s]+)/i);
+          robotsTxtContent = await robotsResponse.text();
+          const sitemapMatch = robotsTxtContent.match(/sitemap:\s*(https?:\/\/[^\s]+)/i);
           if (sitemapMatch) {
             sitemapUrl = sitemapMatch[1];
           }
@@ -200,22 +315,12 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
 
     const urls = await getAllSitemapUrls(sitemapUrl);
 
-    // Deduplicate URLs
-    const seenKeys = new Set();
-    const uniqueUrls = [];
-    for (const url of urls) {
-      try {
-        const parsed = new URL(url);
-        const normalizedPath = parsed.pathname.replace(/\/$/, '') || '/';
-        const key = `${parsed.hostname}${normalizedPath}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          uniqueUrls.push(url);
-        }
-      } catch (e) {
-        uniqueUrls.push(url);
-      }
-    }
+    // Deduplicate URLs by hostname + normalized path
+    const { unique: uniqueUrls, seen: seenKeys } = dedupeUrls(urls, url => {
+      const parsed = new URL(url);
+      const normalizedPath = parsed.pathname.replace(/\/$/, '') || '/';
+      return `${parsed.hostname}${normalizedPath}`;
+    });
 
     audit.totalUrls = uniqueUrls.length;
     console.log(`Found ${uniqueUrls.length} unique URLs in sitemap for ${domain} (from ${urls.length} total, ${urls.length - uniqueUrls.length} duplicates)`);
@@ -289,6 +394,15 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
 
     audit.issues = generateSEOIssues(audit);
 
+    // AI Readiness: domain-level checks (reuse already-fetched robots.txt)
+    try {
+      audit.aiReadiness = await checkAIReadiness(domain, robotsTxtContent);
+      console.log(`AI readiness check complete for ${domain}: score pending storage`);
+    } catch (e) {
+      console.error(`AI readiness check failed for ${domain}:`, e.message);
+      audit.aiReadiness = null;
+    }
+
   } catch (error) {
     audit.error = error.message;
     console.error(`Audit error for ${domain}:`, error);
@@ -301,7 +415,7 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
   if (env.DB) {
     try {
       console.log(`Storing audit in D1 for ${domain}...`);
-      await storeAuditInD1(env.DB, domain, today, audit, userId);
+      await storeAuditInD1(env, domain, today, audit, userId);
       console.log(`SUCCESS: Stored audit for ${domain} in D1 (${audit.audited} pages)`);
     } catch (e) {
       console.error(`FAILED to store audit in D1: ${e.message}`);
@@ -315,9 +429,23 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
       if (legacyPropertyId) {
         // Legacy hardcoded properties
         console.log(`Fetching Search Console data for ${domain}...`);
-        await fetchAndStoreSearchConsole(env, domain, legacyPropertyId, today, userId);
+        await fetchAndStoreSearchConsole(env, domain, legacyPropertyId, today);
       }
-      // Note: SaaS users' Search Console data is fetched via OAuth in the handlers
+
+      // SaaS users: fetch via OAuth if connected
+      if (userId) {
+        const dbProp = await env.DB.prepare(
+          'SELECT * FROM properties WHERE domain = ? AND user_id = ? AND google_refresh_token_encrypted IS NOT NULL AND gsc_properties IS NOT NULL'
+        ).bind(domain, userId).first();
+        if (dbProp) {
+          const { getPropertyCredentials } = await import('./tenant.js');
+          const creds = getPropertyCredentials(dbProp, env);
+          if (creds.searchConsole.properties.length > 0) {
+            console.log(`Fetching OAuth Search Console data for ${domain}...`);
+            await fetchAndStoreSearchConsole(env, domain, dbProp.id, today, creds);
+          }
+        }
+      }
     } catch (e) {
       console.error(`Failed Search Console for ${domain}: ${e.message}`);
     }
@@ -329,19 +457,7 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
         console.log(`Fetching performance data for ${domain}...`);
         psiResult = await fetchPageSpeedInsights(domain, env.PAGESPEED_API_KEY);
         if (psiResult && !psiResult.error) {
-          await env.DB.prepare(`
-            INSERT INTO performance_history (domain, date, lcp_ms, fcp_ms, cls, inp_ms, ttfb_ms, recorded_at, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(domain, date) DO UPDATE SET
-              lcp_ms = excluded.lcp_ms, fcp_ms = excluded.fcp_ms, cls = excluded.cls,
-              inp_ms = excluded.inp_ms, ttfb_ms = excluded.ttfb_ms, recorded_at = excluded.recorded_at
-          `).bind(
-            domain, today,
-            psiResult.LCP || null, psiResult.FCP || null, psiResult.CLS || null,
-            psiResult.INP || null, psiResult.TTFB || null,
-            new Date().toISOString(),
-            userId
-          ).run();
+          await performanceHistoryStmt(env, domain, today, psiResult, userId, new Date().toISOString()).run();
           console.log(`Stored performance history for ${domain}: LCP=${psiResult.LCP}ms`);
         }
       }
@@ -403,21 +519,385 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
 }
 
 // Store audit results in D1 with change tracking
-export async function storeAuditInD1(db, domain, auditDate, audit, userId = null) {
-  console.log(`storeAuditInD1: Starting for ${domain} on ${auditDate} (user: ${userId || 'legacy'})`);
+// ============================================================================
+// AI FIX SUGGESTION GENERATOR
+// ============================================================================
 
-  const auditResult = await db.prepare(`
-    INSERT INTO audits (domain, audit_date, total_pages, pages_audited, duration_seconds, user_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(domain, audit_date) DO UPDATE SET
-      total_pages = excluded.total_pages,
-      pages_audited = excluded.pages_audited,
-      duration_seconds = excluded.duration_seconds
-  `).bind(domain, auditDate, audit.totalUrls, audit.audited, audit.duration, userId).run();
-  console.log(`storeAuditInD1: Audit record inserted, changes: ${auditResult.meta?.changes}`);
+export function buildFixPrompt(domain, issue, pageData) {
+  const url = `https://${domain}${issue.path}`;
+  let details = {};
+  try { details = issue.details ? JSON.parse(issue.details) : {}; } catch(e) {}
 
+  const titleVal = pageData?.title?.value || '';
+  const descVal = pageData?.description?.value || '';
+
+  switch (issue.type) {
+    case 'missing_title':
+      return `Page ${url} has no <title> tag. The page content starts with: "${titleVal || 'unknown'}". Write a specific <title> tag (50-60 chars) for this page on ${domain}.`;
+    case 'short_title':
+      return `Page ${url} has a short title: "${details.value || ''}" (${details.length || 0} chars). Write an improved <title> tag (50-60 chars) that expands on this while keeping the meaning.`;
+    case 'missing_description':
+      return `Page ${url} on ${domain} has no meta description. The title is "${titleVal}". Write a specific meta description (150-160 chars) for this page.`;
+    case 'short_description':
+      return `Page ${url} has a short meta description: "${details.value || ''}" (${details.length || 0} chars). Write an improved meta description (150-160 chars).`;
+    case 'missing_h1':
+      return `Page ${url} has no H1 heading. The title is "${titleVal}". Suggest an appropriate H1 heading for this page.`;
+    case 'multiple_h1':
+      return `Page ${url} has ${details.count || 'multiple'} H1 headings. Explain which to keep as H1 and how to restructure the rest as H2s.`;
+    case 'missing_schema':
+      return `Page ${url} (title: "${titleVal}") on ${domain} has no Schema.org JSON-LD markup. Provide a specific JSON-LD snippet appropriate for this page.`;
+    case 'schema_error':
+      return `Page ${url} has invalid Schema.org JSON-LD that fails parsing. Provide a corrected, minimal JSON-LD WebPage snippet for this page.`;
+    case 'missing_canonical':
+      return `Page ${url} has no canonical tag. Provide the exact <link rel="canonical" href="..."> tag to add.`;
+    case 'canonical_mismatch':
+      return `Page ${url} has canonical pointing to "${details.canonical || 'different URL'}" instead of itself. Should the canonical be the page URL or is this intentional? Provide the fix.`;
+    case 'invalid_canonical':
+      return `Page ${url} has a malformed canonical URL. Provide the correct <link rel="canonical"> tag.`;
+    case 'missing_social_tags':
+      return `Page ${url} (title: "${titleVal}") is missing Open Graph/Twitter Card tags. Provide the essential og:title, og:description, og:image, and twitter:card meta tags.`;
+    case 'partial_social_tags':
+      return `Page ${url} has incomplete social meta tags. Missing: ${details.missing || 'some tags'}. Provide the missing tags.`;
+    case 'images_no_lazy':
+      return `Page ${url} has ${details.count || 'some'} images without lazy loading. Show how to add loading="lazy" to below-fold images. Example snippet: ${(details.snippets || []).slice(0,1).join('')}`;
+    case 'images_no_dimensions':
+      return `Page ${url} has ${details.count || 'some'} images without width/height attributes causing layout shift. Show how to add explicit dimensions.`;
+    case 'images_not_webp':
+      return `Page ${url} has ${details.count || 'some'} images not using WebP format. Explain how to convert or serve WebP with a <picture> element.`;
+    case 'duplicate_title':
+      return `Multiple pages share the title "${details.title || ''}": ${(details.duplicatePages || []).slice(0,3).join(', ')}. Suggest unique titles for each.`;
+    case 'duplicate_description':
+      return `Multiple pages share the same meta description: ${(details.duplicatePages || []).slice(0,3).join(', ')}. Suggest unique descriptions for each.`;
+    // Accessibility issues
+    case 'missing_alt':
+      return `Page ${url} has images without alt text. Describe how to write good alt text and give 2 examples for a ${domain} website.`;
+    case 'empty_buttons':
+      return `Page ${url} has buttons with no accessible text. Snippets: ${(details.snippets || []).slice(0,2).join('; ')}. Suggest aria-label values for each.`;
+    case 'empty_links':
+      return `Page ${url} has links with no accessible text. Suggest adding aria-label or visible text content.`;
+    case 'missing_labels':
+      return `Page ${url} has form inputs without associated labels. Show how to add <label for="..."> elements.`;
+    case 'missing_lang':
+      return `Page ${url} is missing the lang attribute on <html>. Provide the exact fix.`;
+    case 'low_contrast':
+      return `Page ${url} has text with insufficient color contrast. Explain the WCAG 4.5:1 ratio requirement and suggest checking with a contrast tool.`;
+    case 'heading_hierarchy':
+      return `Page ${url} has headings that skip levels (e.g., H1 to H3). Explain proper heading hierarchy and how to fix it.`;
+    case 'no_skip_link':
+      return `Page ${url} has no skip navigation link. Provide the HTML/CSS for a skip-to-content link.`;
+    // AI Readiness issues
+    case 'shallow_schema':
+      const topType = details.topType || 'WebPage';
+      return `Page ${url} has Schema.org ${topType} markup but with very few fields (${details.fieldCounts?.[topType] || 'few'} properties). List the recommended properties for ${topType} schema that should be added to make this richer for AI systems.`;
+    case 'missing_faq_schema':
+      return `Page ${url} has Q&A-like content (questions in headings) but no FAQPage schema. Provide a JSON-LD FAQPage snippet template this page could use.`;
+    case 'low_content_ratio':
+      return `Page ${url} has a low content-to-boilerplate ratio (${Math.round((details.contentRatio || 0) * 100)}%). AI crawlers struggle to extract useful content. Suggest ways to increase meaningful content density.`;
+    case 'missing_dates':
+      return `Page ${url} has no publication or modification dates in meta tags or schema. AI systems prefer dated content for freshness. Provide the meta tags and JSON-LD datePublished/dateModified markup to add.`;
+    case 'missing_author':
+      return `Page ${url} has no author attribution in meta tags or schema. Provide the meta author tag and JSON-LD author markup to add for ${domain}.`;
+    case 'client_side_rendered':
+      return `Page ${url} appears to be client-side rendered (only ${details.visibleTextLength || 0} chars of visible text in the HTML source). AI crawlers cannot execute JavaScript. Suggest SSR, prerendering, or static generation approaches.`;
+    default:
+      return `Page ${url} on ${domain} has the issue: "${issue.type}". Provide a specific, copy-paste-ready fix.`;
+  }
+}
+
+export async function generateAISuggestions(env, domain, issueMap, auditPages) {
+  console.log(`generateAISuggestions: env.AI exists: ${!!env.AI}, issueMap size: ${issueMap.size}, pages: ${auditPages.length}`);
+  if (!env.AI) {
+    console.log('AI binding not available, skipping suggestions');
+    return new Map();
+  }
+
+  // Build page data lookup for context
+  const pageDataMap = new Map();
+  for (const page of auditPages) {
+    if (!page.error) {
+      const path = page.path || '/';
+      pageDataMap.set(path, page);
+    }
+  }
+
+  const suggestions = new Map();
+  const entries = [...issueMap.entries()];
+
+  // Cap at 100 issues (prioritize high severity)
+  const highFirst = entries.sort((a, b) => {
+    const sevOrder = { high: 0, medium: 1, low: 2 };
+    return (sevOrder[a[1].severity] || 2) - (sevOrder[b[1].severity] || 2);
+  });
+  const capped = highFirst.slice(0, 100);
+
+  const AI_BATCH = 5;
+  let generated = 0;
+
+  for (let i = 0; i < capped.length; i += AI_BATCH) {
+    const batch = capped.slice(i, i + AI_BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async ([key, issue]) => {
+        const pageData = pageDataMap.get(issue.path);
+        const prompt = buildFixPrompt(domain, issue, pageData);
+        try {
+          const response = await env.AI.run('@cf/zai-org/glm-4.7-flash', {
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a web developer and SEO expert. Give a brief, specific, actionable fix. Include actual code when helpful. Max 3 sentences. No preamble or explanation of the problem — just the fix.'
+              },
+              { role: 'user', content: prompt }
+            ],
+            max_tokens: 250
+          });
+          const text = response?.response?.trim();
+          if (!text) console.log(`AI returned empty for ${key}:`, JSON.stringify(response).substring(0, 200));
+          return { key, suggestion: text || null };
+        } catch (e) {
+          console.error(`AI suggestion FAILED for ${key}: ${e.message}`, e.stack?.substring(0, 200));
+          return { key, suggestion: null };
+        }
+      })
+    );
+
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value?.suggestion) {
+        suggestions.set(result.value.key, result.value.suggestion);
+        generated++;
+      }
+    }
+
+    // Small delay between batches to be kind to the AI API
+    if (i + AI_BATCH < capped.length) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
+  console.log(`generateAISuggestions: Generated ${generated}/${capped.length} suggestions for ${domain}`);
+  return suggestions;
+}
+
+// ============================================================================
+// AI READINESS: Domain-level checks
+// ============================================================================
+
+const AI_BOTS = ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended', 'Applebot-Extended', 'CCBot'];
+
+export async function checkAIReadiness(domain, robotsTxt = null) {
+  const result = {
+    llmsTxt: { exists: false, quality: 'missing', size: 0 },
+    llmsFullTxt: { exists: false, size: 0 },
+    aiBotRules: {},
+    botsBlocked: 0,
+    botsAllowed: 0,
+  };
+
+  // Check llms.txt and llms-full.txt
+  const llmsChecks = await Promise.allSettled([
+    fetch(`https://${domain}/llms.txt`, { redirect: 'follow' }).then(async r => {
+      if (r.ok) {
+        const text = await r.text();
+        return { exists: true, text, size: text.length };
+      }
+      return { exists: false };
+    }),
+    fetch(`https://${domain}/llms-full.txt`, { redirect: 'follow' }).then(async r => {
+      if (r.ok) {
+        const text = await r.text();
+        return { exists: true, size: text.length };
+      }
+      return { exists: false };
+    }),
+  ]);
+
+  if (llmsChecks[0].status === 'fulfilled' && llmsChecks[0].value.exists) {
+    const data = llmsChecks[0].value;
+    result.llmsTxt.exists = true;
+    result.llmsTxt.size = data.size;
+    // Quality: check if it has meaningful content (URLs, sections)
+    const hasUrls = /https?:\/\//.test(data.text);
+    const hasStructure = data.text.includes('#') || data.text.includes('>');
+    result.llmsTxt.quality = data.size > 100 && hasUrls ? 'good' : data.size > 20 ? 'partial' : 'empty';
+  }
+  if (llmsChecks[1].status === 'fulfilled' && llmsChecks[1].value.exists) {
+    result.llmsFullTxt.exists = true;
+    result.llmsFullTxt.size = llmsChecks[1].value.size;
+  }
+
+  // Parse robots.txt for AI bot rules
+  if (!robotsTxt) {
+    try {
+      const resp = await fetch(`https://${domain}/robots.txt`, { redirect: 'follow' });
+      if (resp.ok) robotsTxt = await resp.text();
+    } catch (e) { /* no robots.txt */ }
+  }
+
+  if (robotsTxt) {
+    // Parse user-agent blocks
+    const lines = robotsTxt.split('\n').map(l => l.trim());
+    let currentAgents = [];
+
+    for (let idx = 0; idx < lines.length; idx++) {
+      const line = lines[idx];
+      if (/^user-agent\s*:/i.test(line)) {
+        const agent = line.replace(/^user-agent\s*:\s*/i, '').trim();
+        // If previous line was also user-agent, accumulate; otherwise start new block
+        if (currentAgents.length === 0 || /^user-agent\s*:/i.test(lines[idx - 1] || '')) {
+          currentAgents.push(agent);
+        } else {
+          currentAgents = [agent];
+        }
+      } else if (/^disallow\s*:\s*\/\s*$/i.test(line) && currentAgents.length > 0) {
+        // Disallow: / — blocks the entire site for these agents
+        for (const agent of currentAgents) {
+          for (const bot of AI_BOTS) {
+            if (agent === '*' || agent.toLowerCase() === bot.toLowerCase()) {
+              if (!result.aiBotRules[bot] || agent.toLowerCase() === bot.toLowerCase()) {
+                result.aiBotRules[bot] = 'blocked';
+              }
+            }
+          }
+        }
+      } else if (/^allow\s*:\s*\//i.test(line) && currentAgents.length > 0) {
+        for (const agent of currentAgents) {
+          for (const bot of AI_BOTS) {
+            if (agent.toLowerCase() === bot.toLowerCase()) {
+              result.aiBotRules[bot] = 'allowed';
+            }
+          }
+        }
+      }
+    }
+
+    // Fill in bots not specifically mentioned
+    for (const bot of AI_BOTS) {
+      if (!result.aiBotRules[bot]) {
+        // Check if there's a wildcard Disallow: /
+        const hasWildcardBlock = lines.some((l, i) => {
+          if (!/^disallow\s*:\s*\/\s*$/i.test(l)) return false;
+          // Look back for User-agent: *
+          for (let j = i - 1; j >= 0; j--) {
+            if (/^user-agent\s*:\s*\*/i.test(lines[j])) return true;
+            if (!/^user-agent\s*:/i.test(lines[j]) && lines[j] !== '') break;
+          }
+          return false;
+        });
+        result.aiBotRules[bot] = hasWildcardBlock ? 'blocked' : 'allowed';
+      }
+    }
+  } else {
+    // No robots.txt = all allowed
+    for (const bot of AI_BOTS) {
+      result.aiBotRules[bot] = 'allowed';
+    }
+  }
+
+  result.botsBlocked = Object.values(result.aiBotRules).filter(v => v === 'blocked').length;
+  result.botsAllowed = Object.values(result.aiBotRules).filter(v => v === 'allowed').length;
+
+  return result;
+}
+
+// Compute composite AI readiness score (0-100)
+function computeAIReadinessScore(domainChecks, pageStats) {
+  let score = 0;
+
+  // llms.txt presence (15 points)
+  if (domainChecks.llmsTxt.exists) {
+    score += domainChecks.llmsTxt.quality === 'good' ? 15 : domainChecks.llmsTxt.quality === 'partial' ? 8 : 3;
+  }
+
+  // AI bot accessibility (15 points)
+  const botRatio = domainChecks.botsAllowed / Math.max(1, AI_BOTS.length);
+  score += Math.round(botRatio * 15);
+
+  // Schema depth (25 points)
+  score += Math.round((pageStats.avgSchemaDepth / 100) * 25);
+
+  // Content clarity (25 points) — based on avg content ratio
+  score += Math.round(Math.min(1, pageStats.avgContentRatio / 0.6) * 15);
+  // Date/author presence
+  score += Math.round(pageStats.pctWithDates * 5);
+  score += Math.round(pageStats.pctWithAuthor * 5);
+
+  // CSR penalty (20 points — lose points for CSR pages)
+  const csrPenalty = Math.round((pageStats.csrPages / Math.max(1, pageStats.totalPages)) * 20);
+  score += 20 - csrPenalty;
+
+  return Math.min(100, Math.max(0, score));
+}
+
+// ============================================================================
+// STORE AUDIT IN D1
+// ============================================================================
+
+// Store AI-readiness page issues and the domain-level readiness score for one audit.
+// Wrapped in its own try/catch so a failure here never blocks the main issue storage.
+async function storeAIReadinessData(db, domain, auditDate, audit, userId) {
+  try {
+    let totalSchemaDepth = 0, totalContentRatio = 0, pagesWithDates = 0, pagesWithAuthor = 0, csrPages = 0, faqOpportunityPages = 0;
+    let analyzedPages = 0;
+    const airStmts = [];
+
+    for (const page of audit.pages) {
+      if (page.error || !page.aiReadiness) continue;
+      analyzedPages++;
+      const air = page.aiReadiness;
+      const path = page.path || '/';
+      const pageUrl = page.url || '';
+      totalSchemaDepth += air.schemaDepthScore;
+      totalContentRatio += air.contentRatio;
+      if (air.hasPublishDate || air.hasModifiedDate) pagesWithDates++;
+      if (air.hasAuthor) pagesWithAuthor++;
+      if (air.isCSR) csrPages++;
+
+      const issues = [];
+      if (page.schema?.found && air.schemaDepthScore < 50 && air.schemaDepthScore > 0) {
+        const topType = Object.entries(air.schemaFieldCounts || {}).sort((a, b) => b[1] - a[1])[0];
+        issues.push({ type: 'shallow_schema', severity: 'medium', details: JSON.stringify({ schemaTypes: Object.keys(air.schemaFieldCounts), fieldCounts: air.schemaFieldCounts, topType: topType?.[0] }) });
+      }
+      if (air.hasFaqContent && !air.hasFaqSchema) { faqOpportunityPages++; issues.push({ type: 'missing_faq_schema', severity: 'low', details: null }); }
+      if (air.contentRatio < 0.3 && air.visibleTextLength > 0) { issues.push({ type: 'low_content_ratio', severity: 'medium', details: JSON.stringify({ contentRatio: air.contentRatio, visibleTextLength: air.visibleTextLength }) }); }
+      if (!air.hasPublishDate && !air.hasModifiedDate) { issues.push({ type: 'missing_dates', severity: 'low', details: null }); }
+      if (!air.hasAuthor) { issues.push({ type: 'missing_author', severity: 'low', details: null }); }
+      if (air.isCSR) { issues.push({ type: 'client_side_rendered', severity: 'high', details: JSON.stringify({ visibleTextLength: air.visibleTextLength }) }); }
+
+      for (const issue of issues) {
+        airStmts.push(db.prepare(`
+          INSERT INTO ai_readiness_issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
+            severity = excluded.severity, details = excluded.details, last_seen = excluded.last_seen,
+            fixed_at = CASE WHEN ai_readiness_issues.manually_fixed_at IS NOT NULL THEN ai_readiness_issues.fixed_at ELSE NULL END,
+            reactivated_at = CASE WHEN ai_readiness_issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen ELSE ai_readiness_issues.reactivated_at END
+        `).bind(domain, issue.type, issue.severity, path, pageUrl, issue.details, auditDate, auditDate, userId));
+      }
+    }
+
+    await runInBatches(db, airStmts);
+    await db.prepare(`UPDATE ai_readiness_issues SET fixed_at = ? WHERE domain = ? AND fixed_at IS NULL AND manually_fixed_at IS NULL AND last_seen < ?`).bind(auditDate, domain, auditDate).run();
+    await db.prepare(`UPDATE ai_readiness_issues SET reactivated_at = NULL, fixed_at = ? WHERE domain = ? AND manually_fixed_at IS NOT NULL AND reactivated_at IS NOT NULL AND last_seen < ?`).bind(auditDate, domain, auditDate).run();
+
+    const domainChecks = audit.aiReadiness || { llmsTxt: { exists: false, quality: 'missing' }, llmsFullTxt: { exists: false }, aiBotRules: {}, botsBlocked: 0, botsAllowed: 0 };
+    const pageStats = { totalPages: analyzedPages, avgSchemaDepth: analyzedPages > 0 ? totalSchemaDepth / analyzedPages : 0, avgContentRatio: analyzedPages > 0 ? totalContentRatio / analyzedPages : 0, pctWithDates: analyzedPages > 0 ? pagesWithDates / analyzedPages : 0, pctWithAuthor: analyzedPages > 0 ? pagesWithAuthor / analyzedPages : 0, csrPages };
+    const aiScore = computeAIReadinessScore(domainChecks, pageStats);
+
+    await db.prepare(`
+      INSERT INTO ai_readiness (domain, audit_date, user_id, llms_txt_exists, llms_txt_quality, llms_full_txt_exists, ai_bot_rules, ai_bots_blocked, ai_bots_allowed, ai_readiness_score, schema_depth_avg, content_clarity_avg, csr_pages, faq_opportunity_pages)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(domain, audit_date) DO UPDATE SET llms_txt_exists=excluded.llms_txt_exists, llms_txt_quality=excluded.llms_txt_quality, llms_full_txt_exists=excluded.llms_full_txt_exists, ai_bot_rules=excluded.ai_bot_rules, ai_bots_blocked=excluded.ai_bots_blocked, ai_bots_allowed=excluded.ai_bots_allowed, ai_readiness_score=excluded.ai_readiness_score, schema_depth_avg=excluded.schema_depth_avg, content_clarity_avg=excluded.content_clarity_avg, csr_pages=excluded.csr_pages, faq_opportunity_pages=excluded.faq_opportunity_pages
+    `).bind(domain, auditDate, userId, domainChecks.llmsTxt.exists ? 1 : 0, domainChecks.llmsTxt.quality, domainChecks.llmsFullTxt.exists ? 1 : 0, JSON.stringify(domainChecks.aiBotRules), domainChecks.botsBlocked, domainChecks.botsAllowed, aiScore, Math.round(pageStats.avgSchemaDepth), Math.round(pageStats.avgContentRatio * 100), csrPages, faqOpportunityPages).run();
+
+    console.log(`storeAuditInD1: AI readiness stored (score=${aiScore}, ${airStmts.length} issues, ${analyzedPages} pages analyzed)`);
+  } catch (e) {
+    console.error(`storeAuditInD1: AI readiness storage error: ${e.message}`);
+  }
+}
+
+// Collect all SEO issues (meta, headings, schema, canonical, social, images,
+// duplicates) for an audit into a Map keyed by `${type}|${path}`.
+function collectSEOIssues(audit, domain) {
   const currentIssues = new Map();
-  let issueCount = 0;
 
   for (const page of audit.pages) {
     if (page.error) continue;
@@ -429,53 +909,40 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
 
     if (page.title?.status === 'missing') {
       currentIssues.set(`missing_title|${path}`, { type: 'missing_title', severity: 'high', path, url, details: null });
-      issueCount++;
     } else if (page.title?.status === 'too_short') {
       currentIssues.set(`short_title|${path}`, { type: 'short_title', severity: 'medium', path, url, details: JSON.stringify({ length: page.title.length, value: page.title.value }) });
-      issueCount++;
     }
 
     if (page.description?.status === 'missing') {
       currentIssues.set(`missing_description|${path}`, { type: 'missing_description', severity: 'high', path, url, details: null });
-      issueCount++;
     } else if (page.description?.status === 'too_short') {
       currentIssues.set(`short_description|${path}`, { type: 'short_description', severity: 'medium', path, url, details: JSON.stringify({ length: page.description.length, value: page.description.value }) });
-      issueCount++;
     }
 
     if (page.h1?.count === 0) {
       currentIssues.set(`missing_h1|${path}`, { type: 'missing_h1', severity: 'medium', path, url, details: null });
-      issueCount++;
     } else if (page.h1?.count > 1) {
       currentIssues.set(`multiple_h1|${path}`, { type: 'multiple_h1', severity: 'low', path, url, details: JSON.stringify({ count: page.h1.count }) });
-      issueCount++;
     }
 
     if (page.schema && !page.schema.found) {
       currentIssues.set(`missing_schema|${path}`, { type: 'missing_schema', severity: 'low', path, url, details: null });
-      issueCount++;
     } else if (page.schema?.errors > 0) {
       currentIssues.set(`schema_error|${path}`, { type: 'schema_error', severity: 'high', path, url, details: null });
-      issueCount++;
     }
 
     if (page.canonical?.status === 'missing') {
       currentIssues.set(`missing_canonical|${path}`, { type: 'missing_canonical', severity: 'medium', path, url, details: null });
-      issueCount++;
     } else if (page.canonical?.status === 'mismatch') {
       currentIssues.set(`canonical_mismatch|${path}`, { type: 'canonical_mismatch', severity: 'medium', path, url, details: JSON.stringify({ canonical: page.canonical.url }) });
-      issueCount++;
     } else if (page.canonical?.status === 'invalid') {
       currentIssues.set(`invalid_canonical|${path}`, { type: 'invalid_canonical', severity: 'high', path, url, details: null });
-      issueCount++;
     }
 
     if (page.socialMeta?.status === 'poor') {
       currentIssues.set(`missing_social_tags|${path}`, { type: 'missing_social_tags', severity: 'medium', path, url, details: JSON.stringify({ missing: page.socialMeta.issues }) });
-      issueCount++;
     } else if (page.socialMeta?.status === 'partial') {
       currentIssues.set(`partial_social_tags|${path}`, { type: 'partial_social_tags', severity: 'low', path, url, details: JSON.stringify({ missing: page.socialMeta.issues }) });
-      issueCount++;
     }
 
     const imgIssues = page.imageOptimization?.issues || [];
@@ -486,17 +953,14 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
     if (noLazyCount > 0) {
       const snippets = imgIssues.filter(i => i.issues.includes('no-lazy')).slice(0, 3).map(i => i.snippet);
       currentIssues.set(`images_no_lazy|${path}`, { type: 'images_no_lazy', severity: 'medium', path, url, details: JSON.stringify({ count: noLazyCount, snippets }) });
-      issueCount++;
     }
     if (noDimsCount > 2) {
       const snippets = imgIssues.filter(i => i.issues.includes('no-dimensions')).slice(0, 3).map(i => i.snippet);
       currentIssues.set(`images_no_dimensions|${path}`, { type: 'images_no_dimensions', severity: 'low', path, url, details: JSON.stringify({ count: noDimsCount, snippets }) });
-      issueCount++;
     }
     if (notWebpCount > 2) {
       const snippets = imgIssues.filter(i => i.issues.includes('not-webp')).slice(0, 3).map(i => i.snippet);
       currentIssues.set(`images_not_webp|${path}`, { type: 'images_not_webp', severity: 'low', path, url, details: JSON.stringify({ count: notWebpCount, snippets }) });
-      issueCount++;
     }
   }
 
@@ -529,7 +993,6 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
         type: 'duplicate_title', severity: 'medium', path: firstPage.path, url: firstPage.url,
         details: JSON.stringify({ title: titleVal.substring(0, 60), duplicatePages: pages.map(p => p.path) })
       });
-      issueCount++;
     }
   }
 
@@ -540,11 +1003,58 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
         type: 'duplicate_description', severity: 'medium', path: firstPage.path, url: firstPage.url,
         details: JSON.stringify({ description: descVal.substring(0, 80), duplicatePages: pages.map(p => p.path) })
       });
-      issueCount++;
     }
   }
 
-  console.log(`storeAuditInD1: Found ${issueCount} issues to store`);
+  return currentIssues;
+}
+
+// Collect accessibility issues into parallel maps keyed by `${type}|${path}`:
+// one of issue records (for AI suggestions + upsert) and one of count/snippet data.
+function collectA11yIssues(audit) {
+  const a11yIssueMap = new Map();
+  const a11ySnippetsMap = new Map();
+
+  for (const page of audit.pages) {
+    if (page.error || !page.accessibility?.issues) continue;
+
+    const path = page.path || '/';
+    const url = page.url || '';
+
+    for (const issue of page.accessibility.issues) {
+      const key = `${issue.type}|${path}`;
+      a11yIssueMap.set(key, { type: issue.type, severity: issue.severity, path, url, details: issue.snippets ? JSON.stringify({ snippets: issue.snippets }) : null });
+      a11ySnippetsMap.set(key, { count: issue.count, snippetsJson: issue.snippets ? JSON.stringify(issue.snippets) : null });
+    }
+  }
+
+  return { a11yIssueMap, a11ySnippetsMap };
+}
+
+export async function storeAuditInD1(env, domain, auditDate, audit, userId = null) {
+  const db = env.DB;
+  const BATCH_SIZE = 25;
+  console.log(`storeAuditInD1: Starting for ${domain} on ${auditDate} (user: ${userId || 'legacy'})`);
+
+  const auditResult = await db.prepare(`
+    INSERT INTO audits (domain, audit_date, total_pages, pages_audited, duration_seconds, user_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(domain, audit_date) DO UPDATE SET
+      total_pages = excluded.total_pages,
+      pages_audited = excluded.pages_audited,
+      duration_seconds = excluded.duration_seconds
+  `).bind(domain, auditDate, audit.totalUrls, audit.audited, audit.duration, userId).run();
+  console.log(`storeAuditInD1: Audit record inserted, changes: ${auditResult.meta?.changes}`);
+
+  // ---- AI Readiness: store early (before AI suggestions which may timeout on HTTP triggers) ----
+  await storeAIReadinessData(db, domain, auditDate, audit, userId);
+
+  const currentIssues = collectSEOIssues(audit, domain);
+  console.log(`storeAuditInD1: Found ${currentIssues.size} issues to store`);
+
+  // Generate AI fix suggestions for all issues
+  const aiSuggestions = await generateAISuggestions(env, domain, currentIssues, audit.pages);
+  console.log(`storeAuditInD1: Generated ${aiSuggestions.size} AI suggestions`);
 
   const existingIssues = await db.prepare(`
     SELECT id, issue_type, page_path FROM issues
@@ -553,40 +1063,33 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
 
   console.log(`storeAuditInD1: Found ${existingIssues.results?.length || 0} existing issues`);
 
-  const BATCH_SIZE = 25;
-  const issueEntries = [...currentIssues.entries()];
-  let upserted = 0;
+  // If a manually-fixed issue is found again by the crawl, set reactivated_at
+  // instead of clearing fixed_at — this preserves the manual completion state
+  // and triggers a reactivation alert in the dashboard.
+  const issueStmts = [...currentIssues.entries()].map(([key, issue]) => {
+    const suggestion = aiSuggestions.get(key) || null;
+    return db.prepare(`
+      INSERT INTO issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen, user_id, ai_suggestion)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
+        severity = excluded.severity,
+        page_url = excluded.page_url,
+        details = excluded.details,
+        last_seen = excluded.last_seen,
+        ai_suggestion = COALESCE(excluded.ai_suggestion, issues.ai_suggestion),
+        fixed_at = CASE
+          WHEN issues.manually_fixed_at IS NOT NULL THEN issues.fixed_at
+          ELSE NULL
+        END,
+        reactivated_at = CASE
+          WHEN issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
+          ELSE issues.reactivated_at
+        END
+    `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate, userId, suggestion);
+  });
 
-  for (let i = 0; i < issueEntries.length; i += BATCH_SIZE) {
-    const batch = issueEntries.slice(i, i + BATCH_SIZE);
-    const stmts = batch.map(([key, issue]) => {
-      // If a manually-fixed issue is found again by the crawl, set reactivated_at
-      // instead of clearing fixed_at — this preserves the manual completion state
-      // and triggers a reactivation alert in the dashboard.
-      return db.prepare(`
-        INSERT INTO issues (domain, issue_type, severity, page_path, page_url, details, first_seen, last_seen, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
-          severity = excluded.severity,
-          page_url = excluded.page_url,
-          details = excluded.details,
-          last_seen = excluded.last_seen,
-          fixed_at = CASE
-            WHEN issues.manually_fixed_at IS NOT NULL THEN issues.fixed_at
-            ELSE NULL
-          END,
-          reactivated_at = CASE
-            WHEN issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
-            ELSE issues.reactivated_at
-          END
-      `).bind(domain, issue.type, issue.severity, issue.path, issue.url, issue.details, auditDate, auditDate, userId);
-    });
-
-    await db.batch(stmts);
-    upserted += batch.length;
-  }
-
-  console.log(`storeAuditInD1: Upserted ${upserted} issues`);
+  await runInBatches(db, issueStmts, BATCH_SIZE);
+  console.log(`storeAuditInD1: Upserted ${issueStmts.length} issues`);
 
   // Mark fixed issues — skip manually-fixed issues (they have their own lifecycle)
   const allUnfixed = await db.prepare(`
@@ -600,13 +1103,7 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
   });
 
   if (toFix.length > 0) {
-    for (let i = 0; i < toFix.length; i += BATCH_SIZE) {
-      const batch = toFix.slice(i, i + BATCH_SIZE);
-      const stmts = batch.map(existing => {
-        return db.prepare(`UPDATE issues SET fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id);
-      });
-      await db.batch(stmts);
-    }
+    await runInBatches(db, toFix.map(existing => db.prepare(`UPDATE issues SET fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id)), BATCH_SIZE);
   }
 
   // Also verify manually-fixed issues that are no longer found in crawl — mark as "verified fixed"
@@ -621,13 +1118,7 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
   });
 
   if (verifiedFixes.length > 0) {
-    for (let i = 0; i < verifiedFixes.length; i += BATCH_SIZE) {
-      const batch = verifiedFixes.slice(i, i + BATCH_SIZE);
-      const stmts = batch.map(existing => {
-        return db.prepare(`UPDATE issues SET reactivated_at = NULL, fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id);
-      });
-      await db.batch(stmts);
-    }
+    await runInBatches(db, verifiedFixes.map(existing => db.prepare(`UPDATE issues SET reactivated_at = NULL, fixed_at = ? WHERE id = ?`).bind(auditDate, existing.id)), BATCH_SIZE);
     console.log(`storeAuditInD1: Verified ${verifiedFixes.length} manually-fixed issues are now truly fixed`);
   }
 
@@ -635,28 +1126,23 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
 
   // Handle broken links
   const brokenLinks = audit.brokenLinks || [];
-  if (brokenLinks.length > 0) {
-    for (let i = 0; i < brokenLinks.length; i += BATCH_SIZE) {
-      const batch = brokenLinks.slice(i, i + BATCH_SIZE);
-      const stmts = [];
-      for (const broken of batch) {
-        try {
-          const linkPath = new URL(broken.url).pathname;
-          stmts.push(db.prepare(`
-            INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(domain, link_path) DO UPDATE SET
-              status_code = excluded.status_code,
-              last_seen = excluded.last_seen,
-              fixed_at = NULL
-          `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate, userId));
-        } catch (e) {
-          // skip invalid URLs
-        }
-      }
-      if (stmts.length > 0) await db.batch(stmts);
+  const brokenLinkStmts = [];
+  for (const broken of brokenLinks) {
+    try {
+      const linkPath = new URL(broken.url).pathname;
+      brokenLinkStmts.push(db.prepare(`
+        INSERT INTO broken_links (domain, link_url, link_path, status_code, first_seen, last_seen, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(domain, link_path) DO UPDATE SET
+          status_code = excluded.status_code,
+          last_seen = excluded.last_seen,
+          fixed_at = NULL
+      `).bind(domain, broken.url, linkPath, broken.status, auditDate, auditDate, userId));
+    } catch (e) {
+      // skip invalid URLs
     }
   }
+  await runInBatches(db, brokenLinkStmts, BATCH_SIZE);
 
   console.log(`storeAuditInD1: Processed ${brokenLinks.length} broken links`);
 
@@ -665,46 +1151,38 @@ export async function storeAuditInD1(db, domain, auditDate, audit, userId = null
     WHERE domain = ? AND fixed_at IS NULL AND last_seen < ?
   `).bind(auditDate, domain, auditDate).run();
 
-  // Handle accessibility issues
+  // Handle accessibility issues — collect into maps first for AI suggestions
+  const { a11yIssueMap, a11ySnippetsMap } = collectA11yIssues(audit);
+
+  // Generate AI suggestions for accessibility issues
+  const a11yAISuggestions = await generateAISuggestions(env, domain, a11yIssueMap, audit.pages);
+  console.log(`storeAuditInD1: Generated ${a11yAISuggestions.size} a11y AI suggestions`);
+
   const a11yStmts = [];
-  const currentA11yKeys = new Set();
-
-  for (const page of audit.pages) {
-    if (page.error || !page.accessibility?.issues) continue;
-
-    const path = page.path || '/';
-    const url = page.url || '';
-
-    for (const issue of page.accessibility.issues) {
-      const key = `${issue.type}|${path}`;
-      currentA11yKeys.add(key);
-      const snippetsJson = issue.snippets ? JSON.stringify(issue.snippets) : null;
-
-      a11yStmts.push(db.prepare(`
-        INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
-          severity = excluded.severity,
-          issue_count = excluded.issue_count,
-          snippets = excluded.snippets,
-          last_seen = excluded.last_seen,
-          fixed_at = CASE
-            WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN accessibility_issues.fixed_at
-            ELSE NULL
-          END,
-          reactivated_at = CASE
-            WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
-            ELSE accessibility_issues.reactivated_at
-          END
-      `).bind(domain, issue.type, issue.severity, path, url, issue.count, snippetsJson, auditDate, auditDate, userId));
-    }
+  for (const [key, issue] of a11yIssueMap.entries()) {
+    const snippetData = a11ySnippetsMap.get(key);
+    const suggestion = a11yAISuggestions.get(key) || null;
+    a11yStmts.push(db.prepare(`
+      INSERT INTO accessibility_issues (domain, issue_type, severity, page_path, page_url, issue_count, snippets, first_seen, last_seen, user_id, ai_suggestion)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(domain, issue_type, page_path) DO UPDATE SET
+        severity = excluded.severity,
+        issue_count = excluded.issue_count,
+        snippets = excluded.snippets,
+        last_seen = excluded.last_seen,
+        ai_suggestion = COALESCE(excluded.ai_suggestion, accessibility_issues.ai_suggestion),
+        fixed_at = CASE
+          WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN accessibility_issues.fixed_at
+          ELSE NULL
+        END,
+        reactivated_at = CASE
+          WHEN accessibility_issues.manually_fixed_at IS NOT NULL THEN excluded.last_seen
+          ELSE accessibility_issues.reactivated_at
+        END
+    `).bind(domain, issue.type, issue.severity, issue.path, issue.url, snippetData.count, snippetData.snippetsJson, auditDate, auditDate, userId, suggestion));
   }
 
-  for (let i = 0; i < a11yStmts.length; i += BATCH_SIZE) {
-    const batch = a11yStmts.slice(i, i + BATCH_SIZE);
-    await db.batch(batch);
-  }
-
+  await runInBatches(db, a11yStmts, BATCH_SIZE);
   console.log(`storeAuditInD1: Upserted ${a11yStmts.length} accessibility issues`);
 
   // Mark a11y issues as fixed — skip manually-fixed ones
@@ -747,50 +1225,11 @@ export async function auditSinglePageWithLinks(url, domain) {
     const html = await response.text();
     const path = new URL(url).pathname;
 
-    // Parse title
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-    const titleLen = title.length;
-    let titleStatus = 'good';
-    if (!title) titleStatus = 'missing';
-    else if (titleLen < 30) titleStatus = 'too_short';
-    else if (titleLen > 60) titleStatus = 'too_long';
-
-    // Parse meta description
-    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
-                      html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
-    const description = descMatch ? descMatch[1].trim() : '';
-    const descLen = description.length;
-    let descStatus = 'good';
-    if (!description) descStatus = 'missing';
-    else if (descLen < 70) descStatus = 'too_short';
-    else if (descLen > 160) descStatus = 'too_long';
-
-    // Parse H1
-    const h1Matches = html.match(/<h1[^>]*>/gi) || [];
-    const h1Count = h1Matches.length;
-
-    // Parse Schema.org JSON-LD
-    const jsonLdMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
-    let schemaFound = jsonLdMatches.length > 0;
-    let schemaTypes = [];
-    let schemaErrors = 0;
-
-    jsonLdMatches.forEach(match => {
-      try {
-        const jsonContent = match.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
-        const parsed = JSON.parse(jsonContent);
-        const items = parsed['@graph'] || [parsed];
-        items.forEach(item => {
-          if (item['@type']) {
-            const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
-            schemaTypes.push(...types);
-          }
-        });
-      } catch (e) {
-        schemaErrors++;
-      }
-    });
+    const title = parseTitle(html);
+    const description = parseDescription(html);
+    const h1 = parseH1(html);
+    const schema = parseJsonLd(html);
+    const schemaTypes = schema.types;
 
     // Parse Canonical URL
     const canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']*)["'][^>]*>/i) ||
@@ -811,24 +1250,16 @@ export async function auditSinglePageWithLinks(url, domain) {
       }
     }
 
-    // Parse Social Meta Tags (Open Graph)
-    const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                    html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*property=["']og:title["']/i)?.[1] || '';
-    const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                   html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*property=["']og:description["']/i)?.[1] || '';
-    const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                    html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*property=["']og:image["']/i)?.[1] || '';
-    const ogUrl = html.match(/<meta[^>]*property=["']og:url["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                  html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*property=["']og:url["']/i)?.[1] || '';
+    // Parse Social Meta Tags (Open Graph + Twitter Card)
+    const ogTitle = getMetaContent(html, 'property', 'og:title');
+    const ogDesc = getMetaContent(html, 'property', 'og:description');
+    const ogImage = getMetaContent(html, 'property', 'og:image');
+    const ogUrl = getMetaContent(html, 'property', 'og:url');
 
-    const twitterCard = html.match(/<meta[^>]*name=["']twitter:card["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                        html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']twitter:card["']/i)?.[1] || '';
-    const twitterTitle = html.match(/<meta[^>]*name=["']twitter:title["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                         html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']twitter:title["']/i)?.[1] || '';
-    const twitterDesc = html.match(/<meta[^>]*name=["']twitter:description["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                        html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']twitter:description["']/i)?.[1] || '';
-    const twitterImage = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']*)["']/i)?.[1] ||
-                         html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']twitter:image["']/i)?.[1] || '';
+    const twitterCard = getMetaContent(html, 'name', 'twitter:card');
+    const twitterTitle = getMetaContent(html, 'name', 'twitter:title');
+    const twitterDesc = getMetaContent(html, 'name', 'twitter:description');
+    const twitterImage = getMetaContent(html, 'name', 'twitter:image');
 
     const socialMeta = {
       og: { title: ogTitle, description: ogDesc, image: ogImage, url: ogUrl },
@@ -930,7 +1361,9 @@ export async function auditSinglePageWithLinks(url, domain) {
     let badHierarchy = false;
     const hierarchySnippets = [];
     headingOrder.forEach(h => {
-      const level = parseInt(h.match(/h([1-6])/i)[1]);
+      const hMatch = h.match(/h([1-6])/i);
+      if (!hMatch) return;
+      const level = parseInt(hMatch[1]);
       if (level > lastLevel + 1 && lastLevel > 0) {
         badHierarchy = true;
         if (hierarchySnippets.length < 5) {
@@ -956,6 +1389,71 @@ export async function auditSinglePageWithLinks(url, domain) {
     if (emptyButtonMatches.length > 0) {
       a11yIssues.push({ type: 'empty_buttons', count: emptyButtonMatches.length, severity: 'high', snippets: emptyButtonSnippets });
     }
+
+    // AI Readiness: Structured data depth scoring (reuse field counts parsed above)
+    let schemaDepthScore = 0;
+    const schemaFieldCounts = schema.fieldCounts;
+    if (Object.keys(schemaFieldCounts).length > 0) {
+      const counts = Object.values(schemaFieldCounts);
+      const avgFields = counts.reduce((a, b) => a + b, 0) / counts.length;
+      schemaDepthScore = Math.min(100, Math.round(avgFields * 10)); // 10 fields = 100
+    }
+
+    // AI Readiness: FAQ/How-To schema detection
+    const headingTexts = (html.match(/<h[2-4][^>]*>[^<]*\?[^<]*<\/h[2-4]>/gi) || []);
+    const dtElements = (html.match(/<dt[^>]*>/gi) || []);
+    const hasFaqContent = headingTexts.length >= 2 || dtElements.length >= 2;
+    const hasFaqSchema = schemaTypes.includes('FAQPage') || schemaTypes.includes('HowTo');
+
+    // AI Readiness: Content clarity signals
+    const strippedHtml = html
+      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+      .replace(/<header[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+      .replace(/<aside[\s\S]*?<\/aside>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const fullText = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+    const contentRatio = fullText.length > 0 ? strippedHtml.length / fullText.length : 0;
+
+    // Publication/modification dates
+    const hasPublishDate = !!html.match(/<meta[^>]*property=["']article:published_time["']/i) ||
+      !!html.match(/["']datePublished["']\s*:/i) ||
+      !!html.match(/<time[^>]*datetime=["'][^"']+["']/i);
+    const hasModifiedDate = !!html.match(/<meta[^>]*property=["']article:modified_time["']/i) ||
+      !!html.match(/["']dateModified["']\s*:/i);
+
+    // Author attribution
+    const hasAuthor = !!html.match(/<meta[^>]*name=["']author["']/i) ||
+      !!html.match(/["']author["']\s*:/i) ||
+      !!html.match(/<a[^>]*rel=["']author["']/i);
+
+    // Client-side rendering detection
+    const bodyContent = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] || '';
+    const visibleText = bodyContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const scriptContent = (bodyContent.match(/<script[\s\S]*?<\/script>/gi) || []).join('');
+    const hasRootDiv = /<div\s+id=["'](root|app|__next)["'][^>]*>\s*<\/div>/i.test(html);
+    const isCSR = (visibleText.length < 200 && scriptContent.length > 5000) || hasRootDiv;
+
+    const aiReadiness = {
+      schemaDepthScore,
+      schemaFieldCounts,
+      hasFaqContent,
+      hasFaqSchema,
+      contentRatio: Math.round(contentRatio * 100) / 100,
+      hasPublishDate,
+      hasModifiedDate,
+      hasAuthor,
+      isCSR,
+      visibleTextLength: visibleText.length,
+    };
 
     // Extract internal links
     const internalLinks = [];
@@ -987,14 +1485,15 @@ export async function auditSinglePageWithLinks(url, domain) {
       path,
       hostname: new URL(url).hostname,
       status: response.status,
-      title: { value: title.substring(0, 70), length: titleLen, status: titleStatus },
-      description: { value: description.substring(0, 100), length: descLen, status: descStatus },
-      h1: { count: h1Count },
-      schema: { found: schemaFound, types: [...new Set(schemaTypes)], errors: schemaErrors },
+      title,
+      description,
+      h1,
+      schema: { found: schema.found, types: schema.uniqueTypes, errors: schema.errors },
       canonical: { url: canonical, status: canonicalStatus },
       socialMeta: { ...socialMeta, status: socialStatus, issues: socialIssues },
       imageOptimization: { issues: imageIssues, totalImages: imgMatches.length },
       accessibility: { issues: a11yIssues },
+      aiReadiness,
       internalLinks: [...new Set(internalLinks)]
     };
 
@@ -1038,55 +1537,16 @@ export async function auditSinglePage(url) {
     const html = await response.text();
     const path = new URL(url).pathname;
 
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : '';
-    const titleLen = title.length;
-    let titleStatus = 'good';
-    if (!title) titleStatus = 'missing';
-    else if (titleLen < 30) titleStatus = 'too_short';
-    else if (titleLen > 60) titleStatus = 'too_long';
-
-    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
-                      html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
-    const description = descMatch ? descMatch[1].trim() : '';
-    const descLen = description.length;
-    let descStatus = 'good';
-    if (!description) descStatus = 'missing';
-    else if (descLen < 70) descStatus = 'too_short';
-    else if (descLen > 160) descStatus = 'too_long';
-
-    const h1Matches = html.match(/<h1[^>]*>/gi) || [];
-    const h1Count = h1Matches.length;
-
-    const jsonLdMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
-    let schemaFound = jsonLdMatches.length > 0;
-    let schemaTypes = [];
-    let schemaErrors = 0;
-
-    jsonLdMatches.forEach(match => {
-      try {
-        const jsonContent = match.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim();
-        const parsed = JSON.parse(jsonContent);
-        const items = parsed['@graph'] || [parsed];
-        items.forEach(item => {
-          if (item['@type']) {
-            const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
-            schemaTypes.push(...types);
-          }
-        });
-      } catch (e) {
-        schemaErrors++;
-      }
-    });
+    const schema = parseJsonLd(html);
 
     return {
       url,
       path,
       status: response.status,
-      title: { value: title.substring(0, 70), length: titleLen, status: titleStatus },
-      description: { value: description.substring(0, 100), length: descLen, status: descStatus },
-      h1: { count: h1Count },
-      schema: { found: schemaFound, types: [...new Set(schemaTypes)], errors: schemaErrors }
+      title: parseTitle(html),
+      description: parseDescription(html),
+      h1: parseH1(html),
+      schema: { found: schema.found, types: schema.uniqueTypes, errors: schema.errors }
     };
 
   } catch (e) {
@@ -1161,8 +1621,7 @@ export async function getAllSitemapUrls(sitemapUrl) {
   }
 
   if (xml.includes('<sitemapindex')) {
-    const sitemapMatches = xml.matchAll(/<loc>([^<]+)<\/loc>/gi);
-    const childSitemaps = [...sitemapMatches].map(m => m[1]);
+    const childSitemaps = extractSitemapLocs(xml);
 
     console.log(`Found sitemap index with ${childSitemaps.length} child sitemaps`);
 
@@ -1170,16 +1629,14 @@ export async function getAllSitemapUrls(sitemapUrl) {
       try {
         const childXml = await fetchSitemapXml(childUrl);
         if (childXml) {
-          const childUrls = [...childXml.matchAll(/<loc>([^<]+)<\/loc>/gi)].map(m => m[1]);
-          urls.push(...childUrls);
+          urls.push(...extractSitemapLocs(childXml));
         }
       } catch (e) {
         console.error(`Error fetching child sitemap ${childUrl}:`, e);
       }
     }
   } else {
-    const urlMatches = xml.matchAll(/<loc>([^<]+)<\/loc>/gi);
-    urls.push(...[...urlMatches].map(m => m[1]));
+    urls.push(...extractSitemapLocs(xml));
   }
 
   console.log(`Found ${urls.length} URLs in sitemap`);
@@ -1242,41 +1699,25 @@ export async function auditSitemapPages(sitemapUrl, maxPages = 25) {
     let urls = [];
 
     if (xml.includes('<sitemapindex')) {
-      const sitemapMatches = xml.matchAll(/<loc>([^<]+)<\/loc>/gi);
-      const childSitemaps = [...sitemapMatches].map(m => m[1]).slice(0, 3);
+      const childSitemaps = extractSitemapLocs(xml).slice(0, 3);
 
       for (const childUrl of childSitemaps) {
         try {
           const childResponse = await fetch(childUrl);
           if (childResponse.ok) {
             const childXml = await childResponse.text();
-            const childUrls = [...childXml.matchAll(/<loc>([^<]+)<\/loc>/gi)].map(m => m[1]);
-            urls.push(...childUrls);
+            urls.push(...extractSitemapLocs(childXml));
           }
         } catch (e) {
           console.error(`Error fetching child sitemap ${childUrl}:`, e);
         }
       }
     } else {
-      const urlMatches = xml.matchAll(/<loc>([^<]+)<\/loc>/gi);
-      urls = [...urlMatches].map(m => m[1]);
+      urls = extractSitemapLocs(xml);
     }
 
     // Deduplicate URLs by normalized path
-    const seenPaths = new Set();
-    const uniqueUrls = [];
-    for (const url of urls) {
-      try {
-        const parsed = new URL(url);
-        const normalizedPath = parsed.pathname.replace(/\/$/, '') || '/';
-        if (!seenPaths.has(normalizedPath)) {
-          seenPaths.add(normalizedPath);
-          uniqueUrls.push(url);
-        }
-      } catch (e) {
-        uniqueUrls.push(url);
-      }
-    }
+    const { unique: uniqueUrls } = dedupeUrls(urls, url => new URL(url).pathname.replace(/\/$/, '') || '/');
 
     audit.totalUrls = uniqueUrls.length;
 

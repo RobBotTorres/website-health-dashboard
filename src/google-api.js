@@ -15,6 +15,32 @@ async function getAccessToken(creds) {
   });
 }
 
+/**
+ * Extract metrics from a GA4 API row by name instead of array index.
+ * Uses metricHeaders from the response to build a name→value map.
+ */
+function extractMetrics(metricHeaders, metricValues) {
+  const map = {};
+  if (!metricHeaders || !metricValues) return map;
+  metricHeaders.forEach((header, i) => {
+    map[header.name] = metricValues[i]?.value || '0';
+  });
+  return map;
+}
+
+/**
+ * Fetch with retry for transient GA4 API failures (429, 500, 502, 503).
+ */
+async function fetchWithRetry(url, options, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, options);
+    if (response.ok || attempt === retries) return response;
+    const status = response.status;
+    if (status !== 429 && status !== 500 && status !== 502 && status !== 503) return response;
+    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+  }
+}
+
 export async function fetchGA4Analytics(creds) {
   if (!creds.propertyId || !creds.credentials) {
     return { error: 'GA4 not configured' };
@@ -24,7 +50,7 @@ export async function fetchGA4Analytics(creds) {
     const accessToken = await getAccessToken(creds);
     const propertyId = creds.propertyId;
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
       {
         method: 'POST',
@@ -56,25 +82,26 @@ export async function fetchGA4Analytics(creds) {
     }
 
     const data = await response.json();
+    const headers = data.metricHeaders || [];
     const rows = data.rows || [];
 
-    const current = rows[0]?.metricValues || [];
-    const previous = rows[1]?.metricValues || [];
+    const cur = extractMetrics(headers, rows[0]?.metricValues);
+    const prev = extractMetrics(headers, rows[1]?.metricValues);
 
-    const sessions = parseInt(current[0]?.value || 0);
-    const prevSessions = parseInt(previous[0]?.value || 0);
-    const avgDuration = parseFloat(current[1]?.value || 0);
-    const pageViews = parseInt(current[2]?.value || 0);
-    const bounceRate = parseFloat(current[3]?.value || 0) * 100;
-    const newUsers = parseInt(current[4]?.value || 0);
-    const prevNewUsers = parseInt(previous[4]?.value || 0);
-    const engagementRate = parseFloat(current[5]?.value || 0) * 100;
+    const sessions = parseInt(cur.sessions || 0);
+    const prevSessions = parseInt(prev.sessions || 0);
+    const avgDuration = parseFloat(cur.averageSessionDuration || 0);
+    const pageViews = parseInt(cur.screenPageViews || 0);
+    const bounceRate = parseFloat(cur.bounceRate || 0) * 100;
+    const newUsers = parseInt(cur.newUsers || 0);
+    const prevNewUsers = parseInt(prev.newUsers || 0);
+    const engagementRate = parseFloat(cur.engagementRate || 0) * 100;
 
     const sessionsChange = prevSessions > 0 ? ((sessions - prevSessions) / prevSessions) * 100 : 0;
     const newUsersChange = prevNewUsers > 0 ? ((newUsers - prevNewUsers) / prevNewUsers) * 100 : 0;
 
     // Get top pages
-    const pagesResponse = await fetch(
+    const pagesResponse = await fetchWithRetry(
       `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
       {
         method: 'POST',
@@ -130,7 +157,7 @@ export async function fetchGA4Performance(creds) {
     const accessToken = await getAccessToken(creds);
     const propertyId = creds.propertyId;
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
       {
         method: 'POST',
@@ -162,20 +189,21 @@ export async function fetchGA4Performance(creds) {
     }
 
     const data = await response.json();
+    const headers = data.metricHeaders || [];
     const rows = data.rows || [];
 
-    const current = rows[0]?.metricValues || [];
-    const previous = rows[1]?.metricValues || [];
+    const cur = extractMetrics(headers, rows[0]?.metricValues);
+    const prev = extractMetrics(headers, rows[1]?.metricValues);
 
-    const sessions = parseInt(current[0]?.value || 0);
-    const users = parseInt(current[1]?.value || 0);
-    const bounceRate = parseFloat(current[2]?.value || 0) * 100;
-    const avgDuration = parseFloat(current[3]?.value || 0);
-    const engagementRate = parseFloat(current[4]?.value || 0) * 100;
-    const pageViews = parseInt(current[5]?.value || 0);
+    const sessions = parseInt(cur.sessions || 0);
+    const users = parseInt(cur.totalUsers || 0);
+    const bounceRate = parseFloat(cur.bounceRate || 0) * 100;
+    const avgDuration = parseFloat(cur.averageSessionDuration || 0);
+    const engagementRate = parseFloat(cur.engagementRate || 0) * 100;
+    const pageViews = parseInt(cur.screenPageViews || 0);
 
-    const prevSessions = parseInt(previous[0]?.value || 0);
-    const prevUsers = parseInt(previous[1]?.value || 0);
+    const prevSessions = parseInt(prev.sessions || 0);
+    const prevUsers = parseInt(prev.totalUsers || 0);
 
     return {
       sessions,
@@ -430,10 +458,15 @@ export async function inspectSitemapUrls(sitemapUrl, siteUrl, accessToken, maxUr
   return issues;
 }
 
-export async function fetchAndStoreSearchConsole(env, domain, propertyId, dataDate) {
+export async function fetchAndStoreSearchConsole(env, domain, propertyId, dataDate, resolvedCreds = null) {
   try {
-    const creds = getCredentials(propertyId, env);
-    if (!creds.searchConsole.properties.length || !creds.searchConsole.credentials) {
+    let creds;
+    if (resolvedCreds) {
+      creds = resolvedCreds;
+    } else {
+      try { creds = getCredentials(propertyId, env); } catch (e) { creds = null; }
+    }
+    if (!creds?.searchConsole?.properties?.length || !creds?.searchConsole?.credentials) {
       console.log(`No Search Console credentials for ${propertyId}`);
       return;
     }
