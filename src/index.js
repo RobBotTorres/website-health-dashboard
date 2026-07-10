@@ -1547,9 +1547,11 @@ async function handleGoogleOAuthDisconnect(request, env, user) {
   const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
   if (!property) return errorResponse('Property not found or access denied', 404);
 
-  // Disconnect Google from ALL user properties (token is shared across properties)
+  // Disconnect Google from ALL user properties (token is shared across properties).
+  // Keep ga4_property_id / gsc_properties: they're inert without a token, and
+  // preserving them means reconnecting restores everything without re-picking.
   await env.DB.prepare(
-    'UPDATE properties SET google_refresh_token_encrypted = NULL, ga4_property_id = NULL, gsc_properties = NULL WHERE user_id = ?'
+    'UPDATE properties SET google_refresh_token_encrypted = NULL WHERE user_id = ?'
   ).bind(user.userId).run();
 
   return jsonResponse({ message: 'Google disconnected from all properties' });
