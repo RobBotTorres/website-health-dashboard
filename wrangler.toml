@@ -40,19 +40,25 @@ crons = ["0 11 * * *", "0 16 * * *"]
 # To add auth: wrangler secret put AUTH_TOKEN --env staging
 
 [env.staging]
-name = "wine-health-dashboard-staging"
-# No cron triggers in staging
+name = "shelobweb-staging"
+workers_dev = true
+# CRITICAL: named envs inherit top-level routes/triggers unless overridden.
+# Staging must never claim the production custom domains or run crons.
+routes = []
+
+[env.staging.triggers]
+crons = []
 
 # Staging D1 — replace with your staging database ID
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "wine-seo-audits-staging"
-database_id = "9f5ca614-0ff3-4202-b221-7e5a83a077b8"
+database_id = "54ccbd59-e69f-4427-9735-f93dd223cca4"
 
 # Staging KV — replace with your staging KV namespace ID
 [[env.staging.kv_namespaces]]
 binding = "SEO_AUDITS"
-id = "5483be90be8440028b492de4300cace6"
+id = "a1b35aaac1ee44e4afeb1f8657c33be5"
 
 [env.staging.vars]
 ADAIR_CF_ZONE_IDS = "3c6f5ec53c64d53b13a3edb15bc86d79,91f16d65b970bfe14bdd005466c305e6"
@@ -67,6 +73,9 @@ CLOSPEGASE_GSC_PROPERTIES = "sc-domain:clospegase.com"
 GIRARD_GSC_PROPERTIES = "sc-domain:girardwinery.com"
 KUNDE_GSC_PROPERTIES = "sc-domain:kunde.com"
 VIANSA_GSC_PROPERTIES = "sc-domain:viansa.com"
+
+[env.staging.ai]
+binding = "AI"
 
 # Workers AI binding (used for AI fix suggestions)
 [ai]
