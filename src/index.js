@@ -205,7 +205,7 @@ function extractPathParam(pathname, basePath) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // ---- CORS preflight ----
@@ -389,7 +389,7 @@ Shelob Web is built on Cloudflare Workers. Contact: via the website. It helps si
 
     // Google OAuth callback (state param identifies the user)
     if (url.pathname === '/api/oauth/google/callback') {
-      return handleGoogleOAuthCallback(url, env);
+      return handleGoogleOAuthCallback(url, env, ctx);
     }
 
     // ================================================================
@@ -598,7 +598,7 @@ async function routeAuthenticated(url, request, env, user) {
 
     if (url.pathname === '/api/properties' && request.method === 'POST') {
       if (user.role !== 'admin') return errorResponse('Only admins can add websites', 403);
-      return handleCreatePropertyRoute(request, env, user);
+      return handleCreatePropertyRoute(request, env, user, ctx);
     }
 
     if (url.pathname.startsWith('/api/properties/') && request.method === 'DELETE') {
@@ -735,7 +735,7 @@ async function routeAuthenticated(url, request, env, user) {
     // ---- Google OAuth ----
     if (url.pathname === '/api/oauth/google/start' && request.method === 'GET') {
       if (user.plan === 'trial') return errorResponse('Google integration requires a paid plan. Please upgrade.', 403);
-      return handleGoogleOAuthStart(url, env, user);
+      return handleGoogleOAuthStart(url, env, user, ctx);
     }
 
     if (url.pathname === '/api/oauth/google/disconnect' && request.method === 'POST') {
@@ -984,7 +984,7 @@ async function handleListProperties(env, user) {
 /**
  * POST /api/properties — Add a new website + run quick audit.
  */
-async function handleCreatePropertyRoute(request, env, user) {
+async function handleCreatePropertyRoute(request, env, user, ctx) {
   if (!env.DB) return errorResponse('Database not available', 500);
 
   const body = await request.json();
@@ -1025,9 +1025,9 @@ async function handleCreatePropertyRoute(request, env, user) {
     }
 
     // Trigger full sitemap audit in the background (don't await)
-    runFullSitemapAudit(property.domain, env, user.userId).catch(err => {
+    ctx.waitUntil(runFullSitemapAudit(property.domain, env, user.userId).catch(err => {
       console.error(`Background audit failed for ${property.domain}:`, err.message);
-    });
+    }));
 
     // Auto-copy Google token from another property if available
     let googleAutoConnected = false;
@@ -1042,9 +1042,9 @@ async function handleCreatePropertyRoute(request, env, user) {
         ).bind(existingToken.google_refresh_token_encrypted, property.id, user.userId).run();
 
         // Auto-discover GA4 + Search Console and prefetch data in the background
-        autoDiscoverIntegrations(property.id, user.userId, existingToken.google_refresh_token_encrypted, env)
+        ctx.waitUntil(autoDiscoverIntegrations(property.id, user.userId, existingToken.google_refresh_token_encrypted, env)
           .then(() => prefetchIntegrationData(property.id, user.userId, env))
-          .catch(err => console.error(`Auto-discover for new property failed: ${err.message}`));
+          .catch(err => console.error(`Auto-discover for new property failed: ${err.message}`)));
 
         googleAutoConnected = true;
       }
@@ -1280,7 +1280,7 @@ async function handleBillingPortal(env, user, url) {
 // GOOGLE OAUTH HANDLERS
 // ============================================================================
 
-async function handleGoogleOAuthStart(url, env, user) {
+async function handleGoogleOAuthStart(url, env, user, ctx) {
   if (!env.DB) return errorResponse('Database not available', 500);
 
   if (!env.GOOGLE_OAUTH_CLIENT_ID || !env.GOOGLE_OAUTH_CLIENT_SECRET) {
@@ -1311,10 +1311,10 @@ async function handleGoogleOAuthStart(url, env, user) {
       console.error('Auto-discover after token reuse failed:', e.message);
     }
 
-    // Trigger background data prefetch
-    prefetchIntegrationData(propertyId, user.userId, env).catch(err => {
+    // Trigger background data prefetch (must survive the response)
+    ctx.waitUntil(prefetchIntegrationData(propertyId, user.userId, env).catch(err => {
       console.error('Prefetch after token reuse failed:', err.message);
-    });
+    }));
 
     // Redirect back to dashboard with success message
     return htmlResponse(oauthResultPage('Google connected! Using your existing Google account.', 'success'));
@@ -1334,7 +1334,7 @@ async function handleGoogleOAuthStart(url, env, user) {
   });
 }
 
-async function handleGoogleOAuthCallback(url, env) {
+async function handleGoogleOAuthCallback(url, env, ctx) {
   if (!env.DB) return errorResponse('Database not available', 500);
 
   const code = url.searchParams.get('code');
@@ -1381,7 +1381,8 @@ async function handleGoogleOAuthCallback(url, env) {
     const discoveryResult = await autoDiscoverIntegrations(property_id, user_id, encryptedRefreshToken, env);
 
     // Background: auto-discover + prefetch for ALL user properties
-    (async () => {
+    // MUST be in ctx.waitUntil — Workers kills bare background promises
+    ctx.waitUntil((async () => {
       try {
         const allProps = await env.DB.prepare(
           'SELECT id FROM properties WHERE user_id = ? AND id != ?'
@@ -1398,12 +1399,12 @@ async function handleGoogleOAuthCallback(url, env) {
       } catch (e) {
         console.error('Background multi-property discovery failed:', e.message);
       }
-    })();
+    })());
 
     // Prefetch data for the initiating property
-    prefetchIntegrationData(property_id, user_id, env).catch(err => {
+    ctx.waitUntil(prefetchIntegrationData(property_id, user_id, env).catch(err => {
       console.error('Background integration prefetch failed:', err.message);
-    });
+    }));
 
     return htmlResponse(oauthResultPage('Google connected successfully!' + discoveryResult.status, 'success'));
 

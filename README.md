@@ -26,7 +26,7 @@ Single Cloudflare Worker serving the entire app:
 | **Cloudflare Worker** | All routing, API endpoints, scheduled audits, HTML serving |
 | **D1 Database** | Properties, users, audits, issues, performance snapshots, keywords, team members, billing |
 | **KV Namespace** | Session tokens, audit cache, OAuth state |
-| **Workers AI** | Generates AI fix suggestions (uses `@cf/zai-org/glm-4.7-flash`) |
+| **Workers AI** | Generates AI fix suggestions (uses `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) |
 | **Cron trigger** | Nightly full-site audit at 11:00 UTC |
 
 External APIs: Google Analytics Data API v1beta, Search Console API, GA4 Admin API, PageSpeed Insights API, Cloudflare GraphQL Analytics, Stripe, Brevo (transactional email).

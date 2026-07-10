@@ -640,7 +640,7 @@ export async function generateAISuggestions(env, domain, issueMap, auditPages) {
         const pageData = pageDataMap.get(issue.path);
         const prompt = buildFixPrompt(domain, issue, pageData);
         try {
-          const response = await env.AI.run('@cf/zai-org/glm-4.7-flash', {
+          const response = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
             messages: [
               {
                 role: 'system',
@@ -650,7 +650,8 @@ export async function generateAISuggestions(env, domain, issueMap, auditPages) {
             ],
             max_tokens: 250
           });
-          const text = response?.response?.trim();
+          let text = response?.response?.trim();
+          if (text) text = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
           if (!text) console.log(`AI returned empty for ${key}:`, JSON.stringify(response).substring(0, 200));
           return { key, suggestion: text || null };
         } catch (e) {
