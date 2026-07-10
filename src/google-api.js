@@ -41,6 +41,46 @@ async function fetchWithRetry(url, options, retries = 2) {
   }
 }
 
+
+/**
+ * Pages whose GA4 page title looks like a 404 — i.e. real visitors are
+ * landing on broken URLs. 28-day window, top 25 by views.
+ */
+export async function fetchGA4NotFound(creds) {
+  if (!creds || !creds.propertyId || !creds.credentials) return { pages: [] };
+  try {
+    const accessToken = await getAccessToken(creds);
+    const response = await fetchWithRetry(
+      `https://analyticsdata.googleapis.com/v1beta/properties/${creds.propertyId}:runReport`,
+      {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dateRanges: [{ startDate: '28daysAgo', endDate: 'yesterday' }],
+          dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
+          metrics: [{ name: 'screenPageViews' }],
+          dimensionFilter: { orGroup: { expressions: [
+            { filter: { fieldName: 'pageTitle', stringFilter: { matchType: 'CONTAINS', value: '404', caseSensitive: false } } },
+            { filter: { fieldName: 'pageTitle', stringFilter: { matchType: 'CONTAINS', value: 'not found', caseSensitive: false } } }
+          ] } },
+          orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
+          limit: 25
+        })
+      }
+    );
+    if (!response.ok) return { pages: [], error: 'GA4 error ' + response.status };
+    const data = await response.json();
+    const pages = (data.rows || []).map(r => ({
+      path: r.dimensionValues?.[0]?.value || '',
+      title: r.dimensionValues?.[1]?.value || '',
+      views: parseInt(r.metricValues?.[0]?.value || '0', 10)
+    }));
+    return { pages };
+  } catch (e) {
+    return { pages: [], error: e.message };
+  }
+}
+
 export async function fetchGA4Analytics(creds) {
   if (!creds.propertyId || !creds.credentials) {
     return { error: 'GA4 not configured' };

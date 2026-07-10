@@ -701,6 +701,16 @@ async function routeAuthenticated(url, request, env, user) {
       return handleKeywords(url.searchParams.get('domain'), env, user);
     }
 
+    if (url.pathname === '/api/ga4-404s') {
+      const pid = url.searchParams.get('property');
+      if (!pid || !env.DB) return jsonResponse({ pages: [] });
+      const prop = await validatePropertyAccess(user.userId, pid, env.DB);
+      if (!prop) return jsonResponse({ pages: [] });
+      const creds = getPropertyCredentials(prop, env);
+      const { fetchGA4NotFound } = await import('./google-api.js');
+      return jsonResponse(await fetchGA4NotFound(creds.ga4));
+    }
+
     if (url.pathname === '/api/404-errors') {
       return handle404Errors(url.searchParams.get('property'), env, user);
     }
@@ -779,6 +789,10 @@ async function routeAuthenticated(url, request, env, user) {
     if (url.pathname === '/api/store-performance') return storePerformanceSnapshot(env, user);
 
     // Generate AI fix suggestions for existing issues (no re-crawl needed)
+    if (url.pathname === '/api/keyword-plan') {
+      return handleKeywordPlan(url, env, user);
+    }
+
     if (url.pathname === '/api/generate-ai-suggestions') {
       if (user.plan === 'trial') return errorResponse('AI fix suggestions require a paid plan. Please upgrade.', 403);
       try {
@@ -1279,6 +1293,78 @@ async function handleBillingPortal(env, user, url) {
 // ============================================================================
 // GOOGLE OAUTH HANDLERS
 // ============================================================================
+
+
+/**
+ * GET /api/keyword-plan?domain=&query=&position=&impressions=
+ * AI content plan for a keyword opportunity: target page, placement, copy.
+ * Cached in KV for 24h per domain+query. Pro+ only.
+ */
+async function handleKeywordPlan(url, env, user) {
+  if (user.plan === 'trial') return errorResponse('AI keyword plans require a paid plan. Please upgrade.', 403);
+  if (!env.AI) return errorResponse('AI binding not available', 500);
+  if (!env.DB) return errorResponse('Database not available', 500);
+
+  const domain = url.searchParams.get('domain');
+  const query = (url.searchParams.get('query') || '').slice(0, 120);
+  const position = url.searchParams.get('position') || '?';
+  const impressions = url.searchParams.get('impressions') || '0';
+  if (!domain || !query) return errorResponse('Missing domain or query');
+
+  const effectiveUser = await resolveEffectiveUser(user.userId, env.DB);
+  const effectiveUserId = effectiveUser.effectiveUserId || user.userId;
+  const property = await getPropertyByDomain(effectiveUserId, domain, env.DB);
+  if (!property) return errorResponse('Property not found', 404);
+
+  const cacheKey = `kwplan:${effectiveUserId}:${domain}:${query.toLowerCase()}`;
+  const cached = await env.SEO_AUDITS.get(cacheKey);
+  if (cached) return jsonResponse({ plan: cached, cached: true });
+
+  // Site context: known page paths from the crawl + GA4 top pages
+  let pages = [];
+  try {
+    const rows = await env.DB.prepare(
+      'SELECT DISTINCT page_path FROM issues WHERE domain = ? LIMIT 15'
+    ).bind(domain).all();
+    pages = (rows.results || []).map(r => r.page_path).filter(Boolean);
+  } catch (e) { /* page inventory optional */ }
+  try {
+    const snap = await env.DB.prepare(
+      'SELECT ga4_top_pages FROM performance_snapshots WHERE domain = ? AND ga4_top_pages IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1'
+    ).bind(domain).first();
+    if (snap?.ga4_top_pages) {
+      JSON.parse(snap.ga4_top_pages).forEach(tp => { if (tp.path && !pages.includes(tp.path)) pages.push(tp.path); });
+    }
+  } catch (e) { /* optional */ }
+
+  const prompt = `Site: ${domain}
+Keyword: "${query}" — currently ranking at position ${position} on Google with ${impressions} impressions in the last 28 days.
+Known pages on the site: ${pages.length ? pages.slice(0, 20).join(', ') : '(homepage only)'}
+
+Produce a concrete plan to improve ranking for this keyword:
+1. Target page: pick ONE page from the list (or say "create new page at /suggested-path").
+2. Placement: exactly where to add the keyword (title tag, H1, first paragraph, FAQ, etc.).
+3. Suggested copy: write 2-3 ready-to-paste sentences that naturally use the keyword.
+Keep the whole answer under 120 words. No preamble.`;
+
+  try {
+    const response = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+      messages: [
+        { role: 'system', content: 'You are a pragmatic SEO strategist. Be specific and concise; never invent pages that were not listed unless proposing a clearly-labeled new page.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 350
+    });
+    let plan = response?.response?.trim();
+    if (plan) plan = plan.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!plan) return errorResponse('AI returned no plan — try again', 502);
+    await env.SEO_AUDITS.put(cacheKey, plan, { expirationTtl: 86400 });
+    return jsonResponse({ plan });
+  } catch (e) {
+    console.error('keyword-plan error:', e.message);
+    return errorResponse('Plan generation failed — try again', 502);
+  }
+}
 
 async function handleGoogleOAuthStart(url, env, user, ctx) {
   if (!env.DB) return errorResponse('Database not available', 500);
