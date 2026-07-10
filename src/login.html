@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign In — Shelob Web</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='white' stroke-width='1.5' opacity='0.3'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='white' stroke-width='1.5' opacity='0.5'/%3E%3Ccircle cx='32' cy='32' r='6' fill='none' stroke='white' stroke-width='1.5' opacity='0.8'/%3E%3Cline x1='32' y1='8' x2='32' y2='56' stroke='white' stroke-width='1.5'/%3E%3Cline x1='8' y1='32' x2='56' y2='32' stroke='white' stroke-width='1.5'/%3E%3Cline x1='15' y1='15' x2='49' y2='49' stroke='white' stroke-width='1.5'/%3E%3Cline x1='49' y1='15' x2='15' y2='49' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="/images/sw_logo.png">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{--bg:#0f1117;--card:#1a1d2e;--border:#2a2d3e;--blue:#6366f1;--blue-hover:#5558e6;--text:#e2e8f0;--text2:#94a3b8;--text3:#8191a6;--green:#22c55e;--red:#ef4444}
@@ -18,9 +18,13 @@
     .card p{color:var(--text2);font-size:14px;margin-bottom:24px;line-height:1.5}
     .form-group{margin-bottom:20px;text-align:left}
     .form-group label{display:block;font-size:13px;color:var(--text2);margin-bottom:6px}
-    .form-group input{width:100%;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;outline:none;transition:border-color 0.2s}
+    .form-group input{width:100%;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;outline:none;transition:border-color 0.2s}
     .form-group input:focus{border-color:var(--blue)}
     .form-group input::placeholder{color:var(--text3)}
+    .consent-group{display:flex;align-items:flex-start;gap:10px;margin-bottom:20px;text-align:left}
+    .consent-group input[type=checkbox]{flex-shrink:0;width:18px;height:18px;margin:8px 0 0;accent-color:var(--blue);cursor:pointer}
+    .consent-group label{font-size:13px;color:var(--text2);line-height:1.5;cursor:pointer;padding:6px 0;min-height:32px;display:flex;align-items:center}
+    .consent-group input[type=checkbox]:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     .btn-primary{width:100%;padding:14px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:background 0.2s}
     .btn-primary:hover{background:var(--blue-hover)}
     .btn-primary:disabled{opacity:0.6;cursor:not-allowed}
@@ -42,16 +46,7 @@
 <body>
   <div class="login-container">
     <a href="/" class="logo">
-      <svg viewBox="0 0 36 36" fill="none">
-        <rect x="2" y="2" width="32" height="32" rx="8" fill="#6366f1" opacity="0.15" stroke="#6366f1" stroke-width="1.5"/>
-        <circle cx="18" cy="18" r="12" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.3"/>
-        <circle cx="18" cy="18" r="7" fill="none" stroke="#6366f1" stroke-width="1.2" opacity="0.6"/>
-        <circle cx="18" cy="18" r="2.5" fill="#6366f1"/>
-        <line x1="18" y1="5" x2="18" y2="31" stroke="#6366f1" stroke-width="1.2"/>
-        <line x1="5" y1="18" x2="31" y2="18" stroke="#6366f1" stroke-width="1.2"/>
-        <line x1="8.8" y1="8.8" x2="27.2" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
-        <line x1="27.2" y1="8.8" x2="8.8" y2="27.2" stroke="#6366f1" stroke-width="1.2"/>
-      </svg>
+      <img src="/images/sw_logo.png" alt="" width="36" height="36" style="border-radius:8px">
       <span>Shelob Web</span>
     </a>
 
@@ -60,12 +55,16 @@
       <h1>Sign in or create an account</h1>
       <p>Enter your email to get a magic sign-in link. New here? We'll create your free account automatically.</p>
 
-      <div id="error-msg" class="error-msg"></div>
+      <div id="error-msg" class="error-msg" role="alert" aria-live="assertive"></div>
 
       <form onsubmit="handleLogin(event)">
         <div class="form-group">
           <label for="email">Email address</label>
           <input type="email" id="email" placeholder="you@company.com" required autocomplete="email" autofocus />
+        </div>
+        <div class="consent-group">
+          <input type="checkbox" id="marketing_opt_in" name="marketing_opt_in"__CONSENT_CHECKED__ />
+          <label for="marketing_opt_in">Send me product tips and occasional updates (you can unsubscribe anytime)</label>
         </div>
         <button type="submit" class="btn-primary" id="submit-btn">Send Magic Link</button>
       </form>
@@ -92,6 +91,7 @@
       var btn = document.getElementById('submit-btn');
       var errorEl = document.getElementById('error-msg');
       var email = document.getElementById('email').value.trim();
+      var marketingOptIn = document.getElementById('marketing_opt_in').checked;
 
       errorEl.style.display = 'none';
       btn.disabled = true;
@@ -101,7 +101,7 @@
         var res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email })
+          body: JSON.stringify({ email: email, marketing_opt_in: marketingOptIn })
         });
         var data = await res.json();
 

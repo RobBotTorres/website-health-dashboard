@@ -9,6 +9,12 @@ type = "Text"
 globs = ["**/*.html"]
 fallthrough = false
 
+# Import image files as binary data modules
+[[rules]]
+type = "Data"
+globs = ["**/*.png", "**/*.svg"]
+fallthrough = false
+
 # Custom domains
 [[routes]]
 pattern = "shelobweb.com"
@@ -18,9 +24,11 @@ custom_domain = true
 pattern = "www.shelobweb.com"
 custom_domain = true
 
-# Cron trigger - runs daily at 3am PST (11am UTC)
+# Cron triggers:
+#   0 11 * * * — nightly site audits (3am PST)
+#   0 16 * * * — lifecycle/drip emails (9am PDT — humane send time)
 [triggers]
-crons = ["0 11 * * *"]
+crons = ["0 11 * * *", "0 16 * * *"]
 
 # ============================================
 # STAGING ENVIRONMENT
@@ -59,6 +67,10 @@ CLOSPEGASE_GSC_PROPERTIES = "sc-domain:clospegase.com"
 GIRARD_GSC_PROPERTIES = "sc-domain:girardwinery.com"
 KUNDE_GSC_PROPERTIES = "sc-domain:kunde.com"
 VIANSA_GSC_PROPERTIES = "sc-domain:viansa.com"
+
+# Workers AI binding (used for AI fix suggestions)
+[ai]
+binding = "AI"
 
 # ============================================
 # PRODUCTION (default)

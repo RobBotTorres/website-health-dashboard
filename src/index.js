@@ -9,6 +9,8 @@ import MARKETING_HTML from './marketing.html';
 import LOGIN_HTML from './login.html';
 import POLICIES_HTML from './policies.html';
 import HELP_HTML from './help.html';
+import LOGO_PNG from './images/sw_logo.png';
+import LOGO_SVG from './images/sw_logo.svg';
 import {
   authenticateRequest,
   sendMagicLink,
@@ -18,8 +20,9 @@ import {
   getUserRecord
 } from './auth.js';
 import { getDateRange } from './utils.js';
+import { runLifecycleEmails, verifyUnsubscribeToken } from './emails.js';
 import { cloudflareGraphQL } from './cloudflare-api.js';
-import { runScheduledAudit, runFullSitemapAudit } from './audit.js';
+import { runScheduledAudit, runFullSitemapAudit, generateAISuggestions, buildFixPrompt } from './audit.js';
 import {
   getGoogleAuthUrl,
   exchangeCodeForTokens,
@@ -57,7 +60,8 @@ import {
   storePerformanceSnapshot,
   fetchCloudflareData,
   fetchSearchConsoleData,
-  handleIssueStatus
+  handleIssueStatus,
+  handleAIReadiness
 } from './handlers.js';
 import { runQuickAudit } from './quick-audit.js';
 import {
@@ -98,37 +102,99 @@ function htmlResponse(html, status = 200, extraHeaders = {}) {
  */
 function swapNavForAuth(html, user) {
   if (!user) return html;
-  // Replace Sign In button (primary) → Dashboard
+  // Nav: collapse the two auth buttons into a SINGLE "Dashboard" CTA.
+  // Remove the outline "Sign In" button entirely so logged-in users don't
+  // see two redundant dashboard buttons.
+  html = html.replace(
+    /<a href="\/login" class="btn btn-outline">Sign In<\/a>\s*/g,
+    ''
+  );
+  // Primary nav "Get Started" (no icon) → single "Dashboard" button
+  html = html.replace(
+    /<a href="\/login" class="btn btn-primary">Get Started<\/a>/g,
+    '<a href="/dashboard" class="btn btn-primary">Dashboard</a>'
+  );
+  // Primary nav plain "Sign In" → Dashboard (other pages: help, policies)
   html = html.replace(
     /<a href="\/login" class="btn btn-primary">Sign In<\/a>/g,
     '<a href="/dashboard" class="btn btn-primary">Dashboard</a>'
   );
-  // Replace "Get Started Free" → "Go to Dashboard" on marketing page
-  html = html.replace(
-    /<a href="\/login" class="btn btn-primary">Get Started Free <svg/g,
-    '<a href="/dashboard" class="btn btn-primary">Go to Dashboard <svg'
-  );
-  // Replace outline Sign In button → Dashboard
+  // Any remaining outline Sign In buttons → Dashboard
   html = html.replace(
     /<a href="\/login" class="btn btn-outline">Sign In<\/a>/g,
     '<a href="/dashboard" class="btn btn-outline">Dashboard</a>'
   );
-  // Replace footer Sign In links
+  // Footer Sign In links
   html = html.replace(
     /<a href="\/login">Sign In<\/a>/g,
     '<a href="/dashboard">Dashboard</a>'
   );
-  // Replace hero CTA "Get Started Free" links
+  // Any other hero/CTA "Get Started Free" → "Go to Dashboard"
   html = html.replace(
     />Get Started Free<\/a>/g,
     '>Go to Dashboard</a>'
   );
-  // Replace "Start Free Trial" links
+  // Hero glow CTA "Start Free Trial <svg/>" → "Go to Dashboard <svg/>"
   html = html.replace(
-    /<a href="\/login" class="btn btn-outline">Start Free Trial<\/a>/g,
-    '<a href="/dashboard" class="btn btn-outline">Go to Dashboard</a>'
+    /(<a href=)"\/login"( class="btn btn-glow"[^>]*>)Start (?:Your )?Free Trial( <svg)/g,
+    '$1"/dashboard"$2Go to Dashboard$3'
+  );
+  // Pricing/other "Start Free Trial" outline buttons → Go to Dashboard
+  html = html.replace(
+    /(<a href=)"\/login"( class="btn btn-outline"[^>]*>)Start Free Trial(<\/a>)/g,
+    '$1"/dashboard"$2Go to Dashboard$3'
   );
   return html;
+}
+
+/**
+ * EU + EEA + UK (+ Switzerland). Visitors from these countries must give
+ * affirmative consent (GDPR Art. 4(11) / UK GDPR / Swiss FADP), so the
+ * marketing-email checkbox renders unchecked for them. Elsewhere it renders
+ * pre-checked.
+ */
+const GDPR_COUNTRIES = new Set([
+  // EU 27
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+  'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+  'SI', 'ES', 'SE',
+  // EEA
+  'IS', 'LI', 'NO',
+  // UK GDPR / Swiss FADP
+  'GB', 'CH'
+]);
+
+/**
+ * Render the login page with a region-aware marketing-consent checkbox.
+ * An unknown country (local dev, or cf absent) is treated as GDPR — unchecked.
+ */
+function renderLoginPage(request) {
+  const country = request.cf?.country;
+  const requiresOptIn = !country || GDPR_COUNTRIES.has(country);
+  return LOGIN_HTML.replace('__CONSENT_CHECKED__', requiresOptIn ? '' : ' checked');
+}
+
+/** Confirmation page for the marketing-email unsubscribe link. */
+function unsubscribePage(success) {
+  const title = success ? 'You\'re unsubscribed' : 'Invalid unsubscribe link';
+  const body = success
+    ? 'You won\'t receive any more product tips or marketing emails from Shelob Web. Sign-in links and account emails are unaffected. Changed your mind? Just tick the box next time you sign in.'
+    : 'This unsubscribe link is invalid or incomplete. Please use the unsubscribe link at the bottom of a recent email, or reply to any of our emails and we\'ll take care of it.';
+  const icon = success ? '&#10003;' : '&#9888;';
+  const iconColor = success ? '#22c55e' : '#f59e0b';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title} — Shelob Web</title><meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/images/sw_logo.png"></head>
+<body style="margin:0;background:#0f1117;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px">
+  <div style="max-width:420px;background:#1a1d2e;border:1px solid #2a2d3e;border-radius:12px;padding:36px 32px;text-align:center">
+    <div style="font-size:40px;color:${iconColor};margin-bottom:12px" aria-hidden="true">${icon}</div>
+    <h1 style="font-size:20px;margin:0 0 10px">${title}</h1>
+    <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 24px">${body}</p>
+    <a href="/" style="color:#6366f1;text-decoration:none;font-size:14px">&larr; Back to Shelob Web</a>
+  </div>
+</body>
+</html>`;
 }
 
 function extractPathParam(pathname, basePath) {
@@ -157,6 +223,14 @@ export default {
       return htmlResponse(swapNavForAuth(MARKETING_HTML, user));
     }
 
+    // Static assets
+    if (url.pathname === '/images/sw_logo.png') {
+      return new Response(LOGO_PNG, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+    }
+    if (url.pathname === '/images/sw_logo.svg') {
+      return new Response(LOGO_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+    }
+
     // Policies page
     if (url.pathname === '/policies') {
       const user = await authenticateRequest(request, env).catch(() => null);
@@ -183,7 +257,7 @@ export default {
       });
     }
 
-    // Robots.txt
+    // Robots.txt — explicitly welcomes AI answer-engine crawlers (AEO)
     if (url.pathname === '/robots.txt') {
       const robots = `User-agent: *
 Allow: /
@@ -192,10 +266,82 @@ Allow: /help
 Disallow: /dashboard
 Disallow: /api/
 
+# AI answer engines & LLM crawlers are welcome on public pages
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+User-agent: CCBot
+Allow: /
+
 Sitemap: https://shelobweb.com/sitemap.xml`;
       return new Response(robots, {
         headers: { 'Content-Type': 'text/plain', ...CORS_HEADERS }
       });
+    }
+
+    // llms.txt — structured site summary for AI answer engines (AEO)
+    if (url.pathname === '/llms.txt') {
+      const llms = `# Shelob Web
+
+> Shelob Web is a website health monitoring platform that runs automated daily audits of SEO, Core Web Vitals, accessibility, AI readiness, and Answer Engine Optimization (AEO) across all of your websites, with AI-powered fix suggestions.
+
+Shelob Web crawls your sitemap every night and reports issues on a single dashboard. It integrates with Google Analytics 4, Google Search Console, and Cloudflare. No code or scripts are installed on your site — it works by crawling your public pages.
+
+## What it monitors
+
+- SEO: titles, meta descriptions, H1 tags, schema markup, canonicals, Open Graph tags, image optimization, broken links
+- Core Web Vitals: LCP, INP, CLS, FCP, TTFB (real Chrome UX field data with Lighthouse fallback)
+- Accessibility: Lighthouse axe-core checks for WCAG issues across every page
+- AI Readiness & AEO: llms.txt detection, AI bot access in robots.txt, structured data depth, FAQ schema, content clarity, author/date signals, and client-side rendering detection
+- AI-powered fix suggestions for every issue
+
+## Pricing
+
+- Trial: Free for 7 days, 1 website, no credit card required
+- Pro: $29/month, up to 5 websites, all integrations, AI readiness & AEO scoring, AI fix suggestions
+- Agency: $59/month, up to 25 websites, team invites with role-based access control, CSV export, priority support
+
+## Key pages
+
+- Home: https://shelobweb.com/
+- Help & FAQ: https://shelobweb.com/help
+- Privacy & Terms: https://shelobweb.com/policies
+- Sign in / Start free trial: https://shelobweb.com/login
+
+## About
+
+Shelob Web is built on Cloudflare Workers. Contact: via the website. It helps site owners, agencies, and marketers improve how their sites perform in both traditional search engines and AI answer engines like ChatGPT, Perplexity, Google AI Overviews, and Claude.
+`;
+      return new Response(llms, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', ...CORS_HEADERS }
+      });
+    }
+
+    // Unsubscribe from marketing emails (public, HMAC-signed link; PRD P0-6)
+    if (url.pathname === '/unsubscribe') {
+      const uid = url.searchParams.get('uid');
+      const sig = url.searchParams.get('sig');
+      const valid = env.ENCRYPTION_KEY && await verifyUnsubscribeToken(uid, sig, env.ENCRYPTION_KEY);
+      if (!valid || !env.DB) {
+        return htmlResponse(unsubscribePage(false), 400);
+      }
+      await env.DB.prepare(
+        'UPDATE users SET marketing_opt_in = 0 WHERE id = ?'
+      ).bind(uid).run();
+      return htmlResponse(unsubscribePage(true));
     }
 
     // Login page
@@ -205,7 +351,11 @@ Sitemap: https://shelobweb.com/sitemap.xml`;
       if (user) {
         return Response.redirect(url.origin + '/dashboard', 302);
       }
-      return htmlResponse(LOGIN_HTML);
+      // Content varies by visitor country (consent checkbox default), so it
+      // must never be served from a shared cache populated by another region.
+      return htmlResponse(renderLoginPage(request), 200, {
+        'Cache-Control': 'private, no-store'
+      });
     }
 
     // ================================================================
@@ -297,7 +447,12 @@ Sitemap: https://shelobweb.com/sitemap.xml`;
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduledAudit(env));
+    // 16:00 UTC = lifecycle/drip emails; anything else = nightly audits
+    if (event.cron === '0 16 * * *') {
+      ctx.waitUntil(runLifecycleEmails(env));
+    } else {
+      ctx.waitUntil(runScheduledAudit(env));
+    }
   }
 };
 
@@ -317,7 +472,7 @@ async function handleAuthLogin(request, env, url) {
       return errorResponse('Email is required');
     }
 
-    const result = await sendMagicLink(email, env, url.origin);
+    const result = await sendMagicLink(email, env, url.origin, body.marketing_opt_in === true);
 
     if (!result.success) {
       return jsonResponse({ success: false, error: result.error }, 400);
@@ -339,7 +494,7 @@ async function handleAuthVerify(url, env) {
     return htmlResponse(authResultPage('Invalid link. No token provided.', 'error'), 400);
   }
 
-  const result = await verifyMagicLink(token, env);
+  const result = await verifyMagicLink(token, env, url.origin);
 
   if (!result.success) {
     return htmlResponse(authResultPage(result.error, 'error'), 400);
@@ -405,6 +560,32 @@ async function routeAuthenticated(url, request, env, user) {
       user.isTeamMember = false;
     }
 
+    // Resolve user plan for feature gating
+    if (env.DB) {
+      const userRecord = await getUserRecord(env.DB, user.effectiveUserId || user.userId);
+      user.plan = userRecord?.plan || 'trial';
+    } else {
+      user.plan = 'trial';
+    }
+
+    // ---- Expired trial lockout ----
+    // Allow only /api/me, /api/billing/*, and /api/properties (GET) for expired trials
+    if (env.DB && user.plan === 'trial') {
+      const userRecord = await getUserRecord(env.DB, user.effectiveUserId || user.userId);
+      const billing = getBillingStatus(userRecord || { plan: 'trial' });
+      if (billing.isTrialExpired && !billing.hasActiveSubscription) {
+        const allowed = ['/api/me', '/api/billing/status', '/api/billing/checkout', '/api/billing/portal'];
+        const isAllowed = allowed.includes(url.pathname)
+          || (url.pathname === '/api/properties' && request.method === 'GET');
+        if (!isAllowed) {
+          return jsonResponse({
+            error: 'Your free trial has expired. Please choose a plan to continue.',
+            trialExpired: true
+          }, 403);
+        }
+      }
+    }
+
     // ---- User & Account ----
     if (url.pathname === '/api/me') {
       return handleMe(env, user);
@@ -443,12 +624,14 @@ async function routeAuthenticated(url, request, env, user) {
 
     // PUT /api/properties/:id/integrations/cloudflare
     if (url.pathname.match(/^\/api\/properties\/[^/]+\/integrations\/cloudflare$/) && request.method === 'PUT') {
+      if (user.plan === 'trial') return errorResponse('Cloudflare integration requires a paid plan. Please upgrade.', 403);
       const propertyId = extractPathParam(url.pathname, '/api/properties/');
       return handleUpdateCFIntegration(propertyId, request, env, user);
     }
 
     // POST /api/properties/:id/integrations/cloudflare/test
     if (url.pathname.match(/^\/api\/properties\/[^/]+\/integrations\/cloudflare\/test$/) && request.method === 'POST') {
+      if (user.plan === 'trial') return errorResponse('Cloudflare integration requires a paid plan. Please upgrade.', 403);
       const propertyId = extractPathParam(url.pathname, '/api/properties/');
       return handleTestCFIntegration(propertyId, env, user);
     }
@@ -479,6 +662,7 @@ async function routeAuthenticated(url, request, env, user) {
 
     if (url.pathname === '/api/team/invite' && request.method === 'POST') {
       if (user.role !== 'admin') return errorResponse('Only admins can invite team members', 403);
+      if (user.plan !== 'agency') return errorResponse('Team invites require the Agency plan. Please upgrade.', 403);
       return handleTeamInvite(request, env, user);
     }
 
@@ -508,6 +692,11 @@ async function routeAuthenticated(url, request, env, user) {
       return handleAccessibility(url.searchParams.get('domain'), env, user);
     }
 
+    if (url.pathname === '/api/ai-readiness') {
+      if (user.plan === 'trial') return errorResponse('AI Readiness scoring requires a paid plan. Please upgrade.', 403);
+      return handleAIReadiness(url.searchParams.get('domain'), env, user);
+    }
+
     if (url.pathname === '/api/keywords') {
       return handleKeywords(url.searchParams.get('domain'), env, user);
     }
@@ -520,6 +709,7 @@ async function routeAuthenticated(url, request, env, user) {
     if (url.pathname === '/api/all-fixed-issues') return handleAllFixedIssues(env, user);
 
     if (url.pathname === '/api/cloudflare') {
+      if (user.plan === 'trial') return errorResponse('Cloudflare integration requires a paid plan. Please upgrade.', 403);
       const propertyId = url.searchParams.get('property');
       if (!propertyId) return errorResponse('Missing property parameter');
       try {
@@ -531,6 +721,7 @@ async function routeAuthenticated(url, request, env, user) {
     }
 
     if (url.pathname === '/api/search-console') {
+      if (user.plan === 'trial') return errorResponse('Google Search Console requires a paid plan. Please upgrade.', 403);
       const propertyId = url.searchParams.get('property');
       if (!propertyId) return errorResponse('Missing property parameter');
       try {
@@ -543,6 +734,7 @@ async function routeAuthenticated(url, request, env, user) {
 
     // ---- Google OAuth ----
     if (url.pathname === '/api/oauth/google/start' && request.method === 'GET') {
+      if (user.plan === 'trial') return errorResponse('Google integration requires a paid plan. Please upgrade.', 403);
       return handleGoogleOAuthStart(url, env, user);
     }
 
@@ -552,6 +744,7 @@ async function routeAuthenticated(url, request, env, user) {
 
     // List GA4 properties available to the user's Google account
     if (url.pathname === '/api/google/ga4-properties' && request.method === 'GET') {
+      if (user.plan === 'trial') return errorResponse('Google integration requires a paid plan. Please upgrade.', 403);
       const propertyId = url.searchParams.get('property_id');
       if (!propertyId) return errorResponse('Missing property_id');
       const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
@@ -584,6 +777,144 @@ async function routeAuthenticated(url, request, env, user) {
 
     if (url.pathname === '/api/cleanup-a11y') return handleCleanupA11y(env, user);
     if (url.pathname === '/api/store-performance') return storePerformanceSnapshot(env, user);
+
+    // Generate AI fix suggestions for existing issues (no re-crawl needed)
+    if (url.pathname === '/api/generate-ai-suggestions') {
+      if (user.plan === 'trial') return errorResponse('AI fix suggestions require a paid plan. Please upgrade.', 403);
+      try {
+        if (!env.AI) return errorResponse('AI binding not available', 500);
+        if (!env.DB) return errorResponse('Database not available', 500);
+
+        const domain = url.searchParams.get('domain');
+        if (!domain) return errorResponse('Missing domain parameter');
+
+        // Verify user has access to this domain
+        const effectiveUser = await resolveEffectiveUser(user.userId, env.DB);
+        const effectiveUserId = effectiveUser.effectiveUserId || user.userId;
+        const property = await getPropertyByDomain(effectiveUserId, domain, env.DB);
+        if (!property) return errorResponse('Property not found', 404);
+        const access = await validatePropertyAccess(effectiveUserId, property.id, env.DB);
+        if (!access) return errorResponse('Access denied', 403);
+
+        // Fetch open SEO issues without AI suggestions
+        const { results: seoIssues } = await env.DB.prepare(`
+          SELECT id, issue_type, severity, page_path, page_url, details
+          FROM issues
+          WHERE domain = ? AND fixed_at IS NULL AND ai_suggestion IS NULL
+          ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+          LIMIT 100
+        `).bind(domain).all();
+
+        // Fetch open accessibility issues without AI suggestions
+        const { results: a11yIssues } = await env.DB.prepare(`
+          SELECT id, issue_type, severity, page_path, page_url
+          FROM accessibility_issues
+          WHERE domain = ? AND fixed_at IS NULL AND ai_suggestion IS NULL
+          ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+          LIMIT 100
+        `).bind(domain).all();
+
+        const totalIssues = seoIssues.length + a11yIssues.length;
+        if (totalIssues === 0) {
+          return jsonResponse({ success: true, message: 'All issues already have AI suggestions', generated: 0 });
+        }
+
+        // Build issue maps for generateAISuggestions
+        // SEO issues
+        const seoIssueMap = new Map();
+        for (const issue of seoIssues) {
+          const key = `${issue.issue_type}::${issue.page_path}`;
+          seoIssueMap.set(key, {
+            type: issue.issue_type,
+            severity: issue.severity,
+            path: issue.page_path,
+            url: issue.page_url || '',
+            details: issue.details ? JSON.parse(issue.details) : {}
+          });
+        }
+
+        // A11y issues
+        const a11yIssueMap = new Map();
+        for (const issue of a11yIssues) {
+          const key = `${issue.issue_type}::${issue.page_path}`;
+          a11yIssueMap.set(key, {
+            type: issue.issue_type,
+            severity: issue.severity,
+            path: issue.page_path,
+            url: issue.page_url || ''
+          });
+        }
+
+        // Generate suggestions (no auditPages needed — we pass empty array, prompts use domain + issue data)
+        let seoGenerated = 0;
+        let a11yGenerated = 0;
+
+        if (seoIssueMap.size > 0) {
+          const seoSuggestions = await generateAISuggestions(env, domain, seoIssueMap, []);
+          // Write suggestions to D1
+          for (const [key, suggestion] of seoSuggestions) {
+            const [issueType, pagePath] = key.split('::');
+            await env.DB.prepare(
+              'UPDATE issues SET ai_suggestion = ? WHERE domain = ? AND issue_type = ? AND page_path = ?'
+            ).bind(suggestion, domain, issueType, pagePath).run();
+            seoGenerated++;
+          }
+        }
+
+        if (a11yIssueMap.size > 0) {
+          const a11ySuggestions = await generateAISuggestions(env, domain, a11yIssueMap, []);
+          for (const [key, suggestion] of a11ySuggestions) {
+            const [issueType, pagePath] = key.split('::');
+            await env.DB.prepare(
+              'UPDATE accessibility_issues SET ai_suggestion = ? WHERE domain = ? AND issue_type = ? AND page_path = ?'
+            ).bind(suggestion, domain, issueType, pagePath).run();
+            a11yGenerated++;
+          }
+        }
+
+        // AI readiness issues
+        const { results: airIssues } = await env.DB.prepare(`
+          SELECT id, issue_type, severity, page_path, page_url, details
+          FROM ai_readiness_issues
+          WHERE domain = ? AND fixed_at IS NULL AND ai_suggestion IS NULL
+          ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END
+          LIMIT 100
+        `).bind(domain).all();
+
+        let airGenerated = 0;
+        if (airIssues.length > 0) {
+          const airIssueMap = new Map();
+          for (const issue of airIssues) {
+            const key = `${issue.issue_type}::${issue.page_path}`;
+            airIssueMap.set(key, {
+              type: issue.issue_type, severity: issue.severity,
+              path: issue.page_path, url: issue.page_url || '',
+              details: issue.details ? JSON.parse(issue.details) : {}
+            });
+          }
+          const airSuggestions = await generateAISuggestions(env, domain, airIssueMap, []);
+          for (const [key, suggestion] of airSuggestions) {
+            const [issueType, pagePath] = key.split('::');
+            await env.DB.prepare(
+              'UPDATE ai_readiness_issues SET ai_suggestion = ? WHERE domain = ? AND issue_type = ? AND page_path = ?'
+            ).bind(suggestion, domain, issueType, pagePath).run();
+            airGenerated++;
+          }
+        }
+
+        return jsonResponse({
+          success: true,
+          generated: seoGenerated + a11yGenerated + airGenerated,
+          seoGenerated,
+          a11yGenerated,
+          airGenerated,
+          totalIssuesProcessed: totalIssues + airIssues.length
+        });
+      } catch (e) {
+        console.error('AI suggestion generation error:', e);
+        return jsonResponse({ error: e.message }, 500);
+      }
+    }
 
     return errorResponse('Not found', 404);
 
@@ -698,10 +1029,35 @@ async function handleCreatePropertyRoute(request, env, user) {
       console.error(`Background audit failed for ${property.domain}:`, err.message);
     });
 
+    // Auto-copy Google token from another property if available
+    let googleAutoConnected = false;
+    try {
+      const existingToken = await env.DB.prepare(
+        'SELECT google_refresh_token_encrypted FROM properties WHERE user_id = ? AND google_refresh_token_encrypted IS NOT NULL AND id != ? LIMIT 1'
+      ).bind(user.userId, property.id).first();
+
+      if (existingToken?.google_refresh_token_encrypted) {
+        await env.DB.prepare(
+          'UPDATE properties SET google_refresh_token_encrypted = ? WHERE id = ? AND user_id = ?'
+        ).bind(existingToken.google_refresh_token_encrypted, property.id, user.userId).run();
+
+        // Auto-discover GA4 + Search Console and prefetch data in the background
+        autoDiscoverIntegrations(property.id, user.userId, existingToken.google_refresh_token_encrypted, env)
+          .then(() => prefetchIntegrationData(property.id, user.userId, env))
+          .catch(err => console.error(`Auto-discover for new property failed: ${err.message}`));
+
+        googleAutoConnected = true;
+      }
+    } catch (e) {
+      console.error(`Google token auto-copy failed: ${e.message}`);
+    }
+
     return jsonResponse({
       property,
       quickAudit: quickAuditResult,
-      message: 'Website added! Quick audit complete — full site crawl running in background.'
+      googleAutoConnected,
+      message: 'Website added! Quick audit complete — full site crawl running in background.' +
+        (googleAutoConnected ? ' Google integration connected automatically.' : '')
     }, 201);
   } catch (e) {
     if (e.message?.includes('UNIQUE constraint')) {
@@ -937,6 +1293,34 @@ async function handleGoogleOAuthStart(url, env, user) {
   const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
   if (!property) return errorResponse('Property not found or access denied', 404);
 
+  // Check if the user already has a Google OAuth token on another property — reuse it
+  const existingToken = await env.DB.prepare(
+    'SELECT google_refresh_token_encrypted FROM properties WHERE user_id = ? AND google_refresh_token_encrypted IS NOT NULL LIMIT 1'
+  ).bind(user.userId).first();
+
+  if (existingToken?.google_refresh_token_encrypted) {
+    // Reuse the existing token — copy it to this property
+    await env.DB.prepare(
+      'UPDATE properties SET google_refresh_token_encrypted = ? WHERE id = ? AND user_id = ?'
+    ).bind(existingToken.google_refresh_token_encrypted, propertyId, user.userId).run();
+
+    // Auto-discover GA4 and Search Console for this property
+    try {
+      await autoDiscoverIntegrations(propertyId, user.userId, existingToken.google_refresh_token_encrypted, env);
+    } catch (e) {
+      console.error('Auto-discover after token reuse failed:', e.message);
+    }
+
+    // Trigger background data prefetch
+    prefetchIntegrationData(propertyId, user.userId, env).catch(err => {
+      console.error('Prefetch after token reuse failed:', err.message);
+    });
+
+    // Redirect back to dashboard with success message
+    return htmlResponse(oauthResultPage('Google connected! Using your existing Google account.', 'success'));
+  }
+
+  // No existing token — start fresh OAuth flow
   const redirectUri = `${url.origin}/api/oauth/google/callback`;
   const state = await createOAuthState(env.DB, user.userId, propertyId, 'google', redirectUri);
 
@@ -988,46 +1372,167 @@ async function handleGoogleOAuthCallback(url, env) {
 
     const encryptedRefreshToken = await encryptToken(tokens.refresh_token, env.ENCRYPTION_KEY);
 
+    // Copy token to ALL user properties (not just the one that initiated OAuth)
     await env.DB.prepare(
-      'UPDATE properties SET google_refresh_token_encrypted = ? WHERE id = ? AND user_id = ?'
-    ).bind(encryptedRefreshToken, property_id, user_id).run();
+      'UPDATE properties SET google_refresh_token_encrypted = ? WHERE user_id = ?'
+    ).bind(encryptedRefreshToken, user_id).run();
 
-    // Auto-discover GA4 property ID for the connected domain
-    let ga4Status = '';
-    try {
-      const property = await env.DB.prepare('SELECT domain, ga4_property_id FROM properties WHERE id = ?').bind(property_id).first();
-      if (property && !property.ga4_property_id) {
-        const ga4Props = await listGA4Properties(encryptedRefreshToken, env);
-        // Try to match by domain
-        const domain = property.domain?.toLowerCase();
-        const match = ga4Props.find(p => {
-          const urls = (p.websiteUrl || '').toLowerCase();
-          return urls.includes(domain);
-        });
-        if (match) {
-          await env.DB.prepare(
-            'UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?'
-          ).bind(match.propertyId, property_id, user_id).run();
-          ga4Status = ' GA4 property auto-detected: ' + match.displayName;
-        } else if (ga4Props.length === 1) {
-          // Only one GA4 property — use it
-          await env.DB.prepare(
-            'UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?'
-          ).bind(ga4Props[0].propertyId, property_id, user_id).run();
-          ga4Status = ' GA4 property auto-detected: ' + ga4Props[0].displayName;
-        } else if (ga4Props.length > 1) {
-          ga4Status = ' Found ' + ga4Props.length + ' GA4 properties — please select one in Settings.';
+    // Auto-discover GA4 + Search Console for the initiating property first
+    const discoveryResult = await autoDiscoverIntegrations(property_id, user_id, encryptedRefreshToken, env);
+
+    // Background: auto-discover + prefetch for ALL user properties
+    (async () => {
+      try {
+        const allProps = await env.DB.prepare(
+          'SELECT id FROM properties WHERE user_id = ? AND id != ?'
+        ).bind(user_id, property_id).all();
+
+        for (const prop of (allProps.results || [])) {
+          try {
+            await autoDiscoverIntegrations(prop.id, user_id, encryptedRefreshToken, env);
+            await prefetchIntegrationData(prop.id, user_id, env);
+          } catch (e) {
+            console.error(`Auto-discover/prefetch for property ${prop.id} failed:`, e.message);
+          }
         }
+      } catch (e) {
+        console.error('Background multi-property discovery failed:', e.message);
       }
-    } catch (e) {
-      console.error('GA4 auto-detect error:', e.message);
-    }
+    })();
 
-    return htmlResponse(oauthResultPage('Google connected successfully!' + ga4Status, 'success'));
+    // Prefetch data for the initiating property
+    prefetchIntegrationData(property_id, user_id, env).catch(err => {
+      console.error('Background integration prefetch failed:', err.message);
+    });
+
+    return htmlResponse(oauthResultPage('Google connected successfully!' + discoveryResult.status, 'success'));
 
   } catch (err) {
     console.error('OAuth callback error:', err);
     return htmlResponse(oauthResultPage('Failed to connect Google: ' + err.message, 'error'), 500);
+  }
+}
+
+/**
+ * Auto-discover GA4 property and Search Console site for a property after OAuth connection.
+ * Shared by both fresh OAuth flow and token-reuse flow.
+ */
+async function autoDiscoverIntegrations(propertyId, userId, encryptedRefreshToken, env) {
+  let status = '';
+
+  // Auto-discover GA4
+  try {
+    const property = await env.DB.prepare('SELECT domain, ga4_property_id FROM properties WHERE id = ?').bind(propertyId).first();
+    if (property && !property.ga4_property_id) {
+      const ga4Props = await listGA4Properties(encryptedRefreshToken, env);
+      const domain = property.domain?.toLowerCase().replace(/^www\./, '');
+      const match = ga4Props.find(p => {
+        const url = (p.websiteUrl || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        return url === domain || url.includes(domain);
+      });
+      if (match) {
+        await env.DB.prepare('UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?')
+          .bind(match.propertyId, propertyId, userId).run();
+        status += ' GA4: ' + match.displayName + '.';
+      } else if (ga4Props.length === 1) {
+        await env.DB.prepare('UPDATE properties SET ga4_property_id = ? WHERE id = ? AND user_id = ?')
+          .bind(ga4Props[0].propertyId, propertyId, userId).run();
+        status += ' GA4: ' + ga4Props[0].displayName + '.';
+      } else if (ga4Props.length > 1) {
+        status += ' Found ' + ga4Props.length + ' GA4 properties — select one in Settings.';
+      }
+    }
+  } catch (e) {
+    console.error('GA4 auto-detect error:', e.message);
+  }
+
+  // Auto-discover Search Console
+  try {
+    const { decryptToken, refreshAccessToken } = await import('./google-oauth.js');
+    const refreshToken = await decryptToken(encryptedRefreshToken, env.ENCRYPTION_KEY);
+    const oauthTokens = await refreshAccessToken(refreshToken, env.GOOGLE_OAUTH_CLIENT_ID, env.GOOGLE_OAUTH_CLIENT_SECRET);
+    const accessToken = oauthTokens.access_token;
+
+    const sitesRes = await fetch('https://searchconsole.googleapis.com/webmasters/v3/sites', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (sitesRes.ok) {
+      const sitesData = await sitesRes.json();
+      const sites = sitesData.siteEntry || [];
+      const prop = await env.DB.prepare('SELECT domain, gsc_properties FROM properties WHERE id = ?').bind(propertyId).first();
+      if (prop && !prop.gsc_properties) {
+        const domain = prop.domain?.toLowerCase().replace(/^www\./, '');
+        const match = sites.find(s => {
+          const siteUrl = (s.siteUrl || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '').replace(/^sc-domain:/, '');
+          return siteUrl === domain || siteUrl.includes(domain);
+        });
+        if (match) {
+          await env.DB.prepare('UPDATE properties SET gsc_properties = ? WHERE id = ? AND user_id = ?')
+            .bind(match.siteUrl, propertyId, userId).run();
+          status += ' Search Console connected.';
+        }
+      }
+    }
+  } catch (e) {
+    console.error('GSC auto-detect error:', e.message);
+  }
+
+  return { status };
+}
+
+/**
+ * Background prefetch of GA4 and Search Console data after OAuth connection.
+ * Fetches data immediately so the dashboard has results without waiting for the nightly audit.
+ */
+async function prefetchIntegrationData(propertyId, userId, env) {
+  const { getPropertyCredentials } = await import('./tenant.js');
+  const { fetchGA4Analytics, fetchAndStoreSearchConsole } = await import('./google-api.js');
+
+  // Re-read property to pick up the just-written GA4 and GSC config
+  const property = await env.DB.prepare('SELECT * FROM properties WHERE id = ?').bind(propertyId).first();
+  if (!property) return;
+
+  const creds = getPropertyCredentials(property, env);
+
+  // Fetch GA4 data and store in performance_snapshots for immediate dashboard display
+  if (creds.ga4.propertyId && creds.ga4.credentials) {
+    try {
+      const ga4 = await fetchGA4Analytics(creds.ga4);
+      console.log(`Prefetched GA4 data for ${property.domain}: ${ga4.sessions || 0} sessions`);
+
+      // Store GA4 data in performance_snapshots so it's immediately available
+      const today = new Date().toISOString().split('T')[0];
+      await env.DB.prepare(`
+        INSERT INTO performance_snapshots (domain, snapshot_date, user_id, ga4_sessions, ga4_sessions_change, ga4_users, ga4_users_change, ga4_bounce_rate, ga4_avg_duration, ga4_engagement_rate, ga4_page_views, ga4_top_pages)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(domain, snapshot_date) DO UPDATE SET
+          ga4_sessions = excluded.ga4_sessions, ga4_sessions_change = excluded.ga4_sessions_change,
+          ga4_users = excluded.ga4_users, ga4_users_change = excluded.ga4_users_change,
+          ga4_bounce_rate = excluded.ga4_bounce_rate, ga4_avg_duration = excluded.ga4_avg_duration,
+          ga4_engagement_rate = excluded.ga4_engagement_rate, ga4_page_views = excluded.ga4_page_views,
+          ga4_top_pages = excluded.ga4_top_pages
+      `).bind(
+        property.domain, today, userId,
+        ga4.sessions || null, parseFloat(ga4.sessionsChange) || null,
+        ga4.newUsers || null, parseFloat(ga4.newUsersChange) || null,
+        parseFloat(ga4.bounceRate) || null, ga4.avgDuration || null,
+        parseFloat(ga4.engagementRate) || null, ga4.pageViews || null,
+        ga4.topPages ? JSON.stringify(ga4.topPages) : null
+      ).run();
+    } catch (e) {
+      console.error(`GA4 prefetch error for ${property.domain}:`, e.message);
+    }
+  }
+
+  // Fetch and store Search Console keyword data into D1
+  if (property.gsc_properties && creds.searchConsole.properties?.length > 0) {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      await fetchAndStoreSearchConsole(env, property.domain, propertyId, today, creds);
+      console.log(`Prefetched Search Console data for ${property.domain}`);
+    } catch (e) {
+      console.error(`Search Console prefetch error for ${property.domain}:`, e.message);
+    }
   }
 }
 
@@ -1041,11 +1546,12 @@ async function handleGoogleOAuthDisconnect(request, env, user) {
   const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
   if (!property) return errorResponse('Property not found or access denied', 404);
 
+  // Disconnect Google from ALL user properties (token is shared across properties)
   await env.DB.prepare(
-    'UPDATE properties SET google_refresh_token_encrypted = NULL WHERE id = ? AND user_id = ?'
-  ).bind(propertyId, user.userId).run();
+    'UPDATE properties SET google_refresh_token_encrypted = NULL, ga4_property_id = NULL, gsc_properties = NULL WHERE user_id = ?'
+  ).bind(user.userId).run();
 
-  return jsonResponse({ message: 'Google disconnected successfully' });
+  return jsonResponse({ message: 'Google disconnected from all properties' });
 }
 
 /**
@@ -1063,29 +1569,51 @@ async function listGA4Properties(encryptedRefreshToken, env) {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
   const accountsData = await accountsRes.json();
-  const accounts = accountsData.accounts || [];
 
-  const properties = [];
-  for (const account of accounts) {
-    const accountId = account.name; // e.g. "accounts/123456"
-    const propsRes = await fetch(
-      `https://analyticsadmin.googleapis.com/v1beta/properties?filter=parent:${accountId}`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
+  let properties = [];
+
+  // If the Admin API returns an error (e.g. API not enabled), try account summaries
+  if (accountsData.error) {
+    console.error('GA4 Admin API error:', JSON.stringify(accountsData.error));
+    const summariesRes = await fetch('https://analyticsadmin.googleapis.com/v1beta/accountSummaries', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    const summariesData = await summariesRes.json();
+    if (summariesData.error) {
+      throw new Error(summariesData.error.message || 'GA4 Admin API not available. Enable "Google Analytics Admin API" in your Google Cloud Console.');
+    }
+    for (const acctSummary of (summariesData.accountSummaries || [])) {
+      for (const propSummary of (acctSummary.propertySummaries || [])) {
+        const numericId = propSummary.property.replace('properties/', '');
+        properties.push({
+          propertyId: numericId,
+          displayName: propSummary.displayName,
+          websiteUrl: '',
+          name: propSummary.property,
+          account: acctSummary.displayName
+        });
       }
-    );
-    const propsData = await propsRes.json();
-    for (const prop of (propsData.properties || [])) {
-      // prop.name is like "properties/123456789"
-      const numericId = prop.name.replace('properties/', '');
-      properties.push({
-        propertyId: numericId,
-        displayName: prop.displayName,
-        websiteUrl: prop.industryCategory || '',
-        // GA4 doesn't directly expose the website URL in the same way UA did,
-        // but we can check data streams for the URL
-        name: prop.name,
-        account: account.displayName
-      });
+    }
+  } else {
+    const accounts = accountsData.accounts || [];
+    for (const account of accounts) {
+      const accountId = account.name;
+      const propsRes = await fetch(
+        `https://analyticsadmin.googleapis.com/v1beta/properties?filter=parent:${accountId}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }
+      );
+      const propsData = await propsRes.json();
+      for (const prop of (propsData.properties || [])) {
+        const numericId = prop.name.replace('properties/', '');
+        properties.push({
+          propertyId: numericId,
+          displayName: prop.displayName,
+          websiteUrl: '',
+          name: prop.name,
+          account: account.displayName
+        });
+      }
     }
   }
 
@@ -1121,7 +1649,7 @@ function oauthResultPage(message, type) {
 .msg{margin-bottom:24px;color:#94a3b8;line-height:1.5}
 a{color:#6366f1;text-decoration:none;font-weight:600}</style></head>
 <body><div class="card"><div class="icon">${type === 'success' ? '✓' : '✕'}</div><p class="msg">${message}</p><a href="/dashboard">Return to Dashboard</a></div>
-<script>setTimeout(function(){window.location.href='/dashboard'},3000)</script></body></html>`;
+<script>setTimeout(function(){window.location.href='/dashboard?refresh=1'},2000)</script></body></html>`;
 }
 
 // ============================================================================
@@ -1232,7 +1760,7 @@ async function handleTeamAcceptInvite(url, request, env) {
 .msg{margin-bottom:24px;color:#94a3b8;line-height:1.5}
 a{color:#6366f1;text-decoration:none;font-weight:600}</style></head>
 <body><div class="card"><div class="icon">&#10003;</div><h3>You're on the team!</h3><p class="msg">You've joined ${owner?.email || 'the team'}'s dashboard. You can now view their website health data.</p><a href="/dashboard">Go to Dashboard</a></div>
-<script>setTimeout(function(){window.location.href='/dashboard'},3000)</script></body></html>`);
+<script>setTimeout(function(){window.location.href='/dashboard?refresh=1'},2000)</script></body></html>`);
   } catch (e) {
     return htmlResponse(authResultPage(e.message, 'error'), 400);
   }

@@ -4,6 +4,8 @@
 // to log in → session cookie set. Sessions stored in KV with 30-day TTL.
 // ============================================================================
 
+import { sendWelcomeEmail } from './emails.js';
+
 const SESSION_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
 const MAGIC_LINK_TTL_MINUTES = 15;
 
@@ -14,9 +16,11 @@ const MAGIC_LINK_TTL_MINUTES = 15;
  * @param {string} email
  * @param {object} env - Worker env bindings
  * @param {string} baseUrl - e.g. "https://shelobweb.com"
+ * @param {boolean} [marketingOptIn=false] - consent chosen on the login form;
+ *   parked on the magic_links row and carried to the user record on verify
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export async function sendMagicLink(email, env, baseUrl) {
+export async function sendMagicLink(email, env, baseUrl, marketingOptIn = false) {
   if (!env.BREVO_API_KEY) {
     throw new Error('BREVO_API_KEY not configured');
   }
@@ -37,8 +41,8 @@ export async function sendMagicLink(email, env, baseUrl) {
 
   // Store in D1
   await env.DB.prepare(
-    'INSERT INTO magic_links (id, email, expires_at) VALUES (?, ?, ?)'
-  ).bind(token, email, expiresAt.toISOString()).run();
+    'INSERT INTO magic_links (id, email, expires_at, marketing_opt_in) VALUES (?, ?, ?, ?)'
+  ).bind(token, email, expiresAt.toISOString(), marketingOptIn ? 1 : 0).run();
 
   // Build magic link URL
   const magicLink = `${baseUrl}/api/auth/verify?token=${token}`;
@@ -79,12 +83,14 @@ export async function sendMagicLink(email, env, baseUrl) {
 /**
  * Verify a magic link token.
  * Validates the token, marks it used, upserts the user, and creates a session.
+ * Fires the welcome email on first account creation.
  *
  * @param {string} token
  * @param {object} env
+ * @param {string} [baseUrl] - origin used to build links in the welcome email
  * @returns {Promise<{success: boolean, sessionId?: string, error?: string}>}
  */
-export async function verifyMagicLink(token, env) {
+export async function verifyMagicLink(token, env, baseUrl) {
   // Look up token
   const row = await env.DB.prepare(
     'SELECT * FROM magic_links WHERE id = ?'
@@ -112,8 +118,15 @@ export async function verifyMagicLink(token, env) {
 
   const email = row.email;
 
-  // Upsert user
-  const userId = await upsertUser(env.DB, email);
+  // Upsert user, carrying the consent choice made when the link was requested
+  const { userId, isNew } = await upsertUser(env.DB, email, row.marketing_opt_in === 1);
+
+  // Welcome email is transactional onboarding — first login only, never blocking
+  if (isNew && baseUrl) {
+    sendWelcomeEmail(email, env, baseUrl).catch(e =>
+      console.error('Welcome email failed:', e.message)
+    );
+  }
 
   // Create session
   const sessionId = await createSession(userId, email, env);
@@ -172,25 +185,37 @@ export async function destroySession(request, env) {
 }
 
 /**
- * Upsert user in D1. Returns the user ID.
- * Creates with 14-day trial on first login.
+ * Upsert user in D1. Creates with a 7-day trial on first login.
+ *
+ * Consent is upgrade-only for returning users: checking the box grants consent,
+ * but leaving it unchecked never revokes it. Unsubscribe is the only opt-out
+ * path, so a default-unchecked form can't silently strip an existing consent.
  *
  * @param {D1Database} db
  * @param {string} email
- * @returns {Promise<string>} userId
+ * @param {boolean} [marketingOptIn=false]
+ * @returns {Promise<{userId: string, isNew: boolean}>}
  */
-async function upsertUser(db, email) {
+async function upsertUser(db, email, marketingOptIn = false) {
   // Check if user exists by email
   const existing = await db.prepare(
     'SELECT id FROM users WHERE email = ?'
   ).bind(email).first();
 
   if (existing) {
-    // Update last login
-    await db.prepare(
-      "UPDATE users SET updated_at = datetime('now') WHERE id = ?"
-    ).bind(existing.id).run();
-    return existing.id;
+    if (marketingOptIn) {
+      await db.prepare(
+        `UPDATE users SET updated_at = datetime('now'),
+           marketing_opt_in = 1,
+           marketing_opt_in_at = COALESCE(marketing_opt_in_at, ?)
+         WHERE id = ?`
+      ).bind(new Date().toISOString(), existing.id).run();
+    } else {
+      await db.prepare(
+        "UPDATE users SET updated_at = datetime('now') WHERE id = ?"
+      ).bind(existing.id).run();
+    }
+    return { userId: existing.id, isNew: false };
   }
 
   // Create new user with 7-day trial
@@ -199,10 +224,17 @@ async function upsertUser(db, email) {
   trialEnds.setDate(trialEnds.getDate() + 7);
 
   await db.prepare(
-    `INSERT INTO users (id, email, plan, trial_ends_at) VALUES (?, ?, 'trial', ?)`
-  ).bind(userId, email, trialEnds.toISOString().split('T')[0]).run();
+    `INSERT INTO users (id, email, plan, trial_ends_at, marketing_opt_in, marketing_opt_in_at)
+     VALUES (?, ?, 'trial', ?, ?, ?)`
+  ).bind(
+    userId,
+    email,
+    trialEnds.toISOString().split('T')[0],
+    marketingOptIn ? 1 : 0,
+    marketingOptIn ? new Date().toISOString() : null
+  ).run();
 
-  return userId;
+  return { userId, isNew: true };
 }
 
 /**
