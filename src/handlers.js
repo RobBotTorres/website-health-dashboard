@@ -706,7 +706,35 @@ export async function handleAIReadiness(domain, env, user) {
     ];
     const aeoPassing = aeoSignals.filter(s => s.status === 'good').length;
 
+    // ---- Per-engine AI visibility readiness ----
+    // An honest composite of what we can actually measure: can this engine's
+    // crawler reach the site, and how digestible is the content once it does.
+    // This is visibility *readiness*, not a claim about actual rankings.
+    const botRules = domainChecks?.aiBotRules || {};
+    const engineDefs = [
+      { key: 'chatgpt', name: 'ChatGPT', vendor: 'OpenAI', bot: 'GPTBot' },
+      { key: 'claude', name: 'Claude', vendor: 'Anthropic', bot: 'ClaudeBot' },
+      { key: 'perplexity', name: 'Perplexity', vendor: 'Perplexity AI', bot: 'PerplexityBot' },
+      { key: 'gemini', name: 'Gemini / AI Overviews', vendor: 'Google', bot: 'Google-Extended' },
+      { key: 'apple', name: 'Apple Intelligence', vendor: 'Apple', bot: 'Applebot-Extended' }
+    ];
+    const llmsPts = llmsExists ? (domainChecks.llmsTxt.quality === 'good' ? 20 : 10) : 0;
+    const schemaPts = Math.round((Math.min(100, schemaDepth) / 100) * 20);
+    const ssrPts = csrPages === 0 ? 20 : Math.max(0, 20 - csrPages * 4);
+    const aiVisibility = engineDefs.map(e => {
+      const access = botRules[e.bot] || 'unknown';
+      const accessPts = access === 'allowed' ? 40 : access === 'unknown' ? 25 : 0;
+      const score = Math.min(100, accessPts + llmsPts + schemaPts + ssrPts);
+      return {
+        engine: e.name, vendor: e.vendor, bot: e.bot,
+        access,
+        score,
+        rating: score >= 70 ? 'good' : score >= 40 ? 'warning' : 'bad'
+      };
+    });
+
     return new Response(JSON.stringify({
+      aiVisibility,
       hasData: !!domainData || issueList.length > 0,
       score: domainData?.ai_readiness_score || 0,
       schemaDepthAvg: domainData?.schema_depth_avg || 0,

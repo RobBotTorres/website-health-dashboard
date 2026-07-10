@@ -29,7 +29,7 @@
   <!-- IBM Plex Sans -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <!-- Structured Data -->
   <script type="application/ld+json">
@@ -194,6 +194,7 @@
     body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
     /* Subtle noise texture overlay */
     body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:0.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-repeat:repeat;background-size:256px 256px}
+    h1,h2,h3,h4{font-family:'Bricolage Grotesque','IBM Plex Sans',system-ui,sans-serif;font-weight:600;line-height:1.06;letter-spacing:-0.02em}
     a{color:var(--blue);text-decoration:none;touch-action:manipulation}
 
     /* ========================================
@@ -212,16 +213,20 @@
     /* On mobile: keep Sign In visible (compact) so users can always log in */
     .nav-links .btn{white-space:nowrap}
     .nav-links .btn-outline{display:inline-flex;padding:9px 12px;font-size:13px}
-    .nav-links .btn-primary{padding:9px 12px;font-size:13px}
+    .nav-links .btn-primary{padding:9px 12px;font-size:13px;color:#fff}
+    .nav-links .btn-primary:hover{color:#fff}
 
     /* Buttons — WCAG AA compliant */
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;text-decoration:none;min-height:44px;touch-action:manipulation;font-family:inherit}
-    .btn-primary{background:#fff;color:#0f1219}
-    .btn-primary:hover{background:#e2e8f0;transform:translateY(-1px)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:3px;font-size:15px;font-weight:600;border:1px solid transparent;cursor:pointer;transition:background 0.18s,border-color 0.18s,color 0.18s,box-shadow 0.18s;text-decoration:none;min-height:44px;touch-action:manipulation;font-family:inherit}
+    .btn-primary{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;box-shadow:0 2px 12px rgba(79,70,229,0.35)}
+    .btn-primary:hover{box-shadow:0 4px 20px rgba(79,70,229,0.5);transform:translateY(-1px)}
     .btn-outline{background:transparent;color:var(--text);border:1px solid var(--border2)}
     .btn-outline:hover{border-color:var(--text3);background:var(--card)}
-    .btn-glow{background:linear-gradient(135deg,#818cf8,#6366f1);color:#fff;box-shadow:0 0 20px rgba(99,102,241,0.3)}
+    .btn-glow{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;box-shadow:0 0 20px rgba(99,102,241,0.3)}
     .btn-glow:hover{box-shadow:0 0 30px rgba(99,102,241,0.5);transform:translateY(-1px)}
+    /* Skip link for keyboard users */
+    .skip-link{position:absolute;left:-9999px;top:0;z-index:200;background:#4f46e5;color:#fff;padding:12px 20px;border-radius:0 0 10px 0;font-size:14px;font-weight:600;text-decoration:none}
+    .skip-link:focus{left:0}
 
     /* Hero */
     .hero-wrap{position:relative;overflow:hidden}
@@ -231,26 +236,26 @@
     .hero-bg .orb-2{width:400px;height:400px;background:radial-gradient(circle,#a855f7 0%,transparent 70%);bottom:-80px;left:-100px}
     .hero-bg .orb-3{width:300px;height:300px;background:radial-gradient(circle,#22d3ee 0%,transparent 70%);top:40%;left:50%;transform:translateX(-50%)}
     .hero-grid{position:absolute;inset:0;background-image:radial-gradient(rgba(99,102,241,0.08) 1px,transparent 1px);background-size:24px 24px;mask-image:radial-gradient(ellipse 60% 60% at 50% 40%,#000 20%,transparent 70%);-webkit-mask-image:radial-gradient(ellipse 60% 60% at 50% 40%,#000 20%,transparent 70%)}
-    .hero{position:relative;padding:92px 22px 56px;text-align:center;max-width:800px;margin:0 auto}
-    .hero-badge{display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:20px;background:var(--card2);color:var(--blue);font-size:11.5px;font-weight:500;margin-bottom:22px;border:1px solid var(--border2);font-family:var(--mono);letter-spacing:-0.01em;max-width:100%}
+    .hero{position:relative;padding:110px 22px 64px;text-align:left;max-width:1100px;margin:0 auto}
+    .hero-badge{display:inline-flex;align-items:center;gap:8px;padding:0;border-radius:0;background:none;color:var(--text3);font-size:11px;font-weight:500;margin-bottom:24px;border:none;font-family:var(--mono);letter-spacing:0.12em;text-transform:uppercase;max-width:100%}
     .hero-badge::before{content:'';display:block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);flex-shrink:0}
-    .hero h1{font-size:clamp(33px,8.5vw,56px);font-weight:700;line-height:1.12;margin-bottom:18px;letter-spacing:-0.03em;color:var(--text);text-wrap:balance}
+    .hero h1{font-size:clamp(2.5rem,4.8vw,3.75rem);font-weight:600;line-height:1.06;margin-bottom:1.75rem;letter-spacing:-0.025em;color:var(--text);text-wrap:balance;max-width:15ch}
     .hero h1 .gradient{background:linear-gradient(135deg,#818cf8 0%,#c084fc 50%,#22d3ee 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap}
     .hero h1 .nb{white-space:nowrap}
-    .hero p{font-size:16px;color:var(--text2);max-width:36ch;margin:0 auto 30px;line-height:1.55;text-wrap:pretty}
-    .hero-cta{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+    .hero p{font-size:1.0625rem;color:var(--text2);max-width:38rem;margin:0 0 32px;line-height:1.6;text-wrap:pretty}
+    .hero-cta{display:flex;flex-direction:column;gap:12px;align-items:stretch;max-width:26rem}
     .hero-cta .btn{width:100%;justify-content:center;padding:15px 24px;font-size:16px}
-    .hero-sub{color:var(--text3);font-size:12px;margin-top:18px;font-family:var(--mono);line-height:1.7;letter-spacing:-0.01em;max-width:32ch;margin-left:auto;margin-right:auto;text-wrap:balance}
+    .hero-sub{color:var(--text3);font-size:12px;margin-top:20px;font-family:var(--mono);line-height:1.7;letter-spacing:0.02em}
 
     /* Section divider */
-    .section-divider{height:1px;background:linear-gradient(90deg,transparent,var(--border2) 20%,var(--blue-glow) 50%,var(--border2) 80%,transparent);max-width:1100px;margin:0 auto}
+    .section-divider{height:1px;background:var(--border);max-width:1100px;margin:0 auto}
 
     /* Sections */
-    .section{padding:60px 20px;max-width:1100px;margin:0 auto;position:relative}
-    .section-title{text-align:center;margin-bottom:36px}
-    .section-title h2{font-size:25px;font-weight:700;margin-bottom:12px;letter-spacing:-0.02em;line-height:1.2;text-wrap:balance}
-    .section-title .tag{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--blue);background:var(--blue-glow);padding:4px 12px;border-radius:4px;margin-bottom:14px;letter-spacing:0.04em;text-transform:uppercase}
-    .section-title p{color:var(--text2);font-size:15px;max-width:46ch;margin:0 auto;line-height:1.55;text-wrap:pretty}
+    .section{padding:clamp(4rem,8vw,7rem) 20px;max-width:1100px;margin:0 auto;position:relative}
+    .section-title{text-align:left;max-width:46rem;margin-bottom:clamp(2.5rem,5vw,4rem)}
+    .section-title h2{font-size:clamp(1.75rem,3.5vw,2.75rem);font-weight:600;margin-bottom:12px;text-wrap:balance}
+    .section-title .tag{display:block;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text3);background:none;padding:0;border-radius:0;margin-bottom:16px;letter-spacing:0.12em;text-transform:uppercase}
+    .section-title p{color:var(--text2);font-size:1.0625rem;max-width:38rem;margin:16px 0 0;line-height:1.6;text-wrap:pretty}
 
     /* Ambient section glows — full bleed behind max-width sections */
     .section-glow{position:static}
@@ -286,9 +291,9 @@
 
     /* Steps */
     .steps{display:grid;grid-template-columns:1fr;gap:24px;margin-top:36px;position:relative}
-    .step{text-align:center;position:relative;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px 20px;overflow:hidden}
+    .step{text-align:left;position:relative;background:none;border:none;border-top:1px solid var(--text2);border-radius:0;padding:2rem 2rem 0 0;overflow:visible}
     .step::after{content:'';position:absolute;bottom:-40px;left:50%;width:100px;height:100px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,0.05),transparent 70%);transform:translateX(-50%);pointer-events:none}
-    .step-num{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#818cf8,#6366f1);color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-family:var(--mono);box-shadow:0 4px 16px rgba(99,102,241,0.3)}
+    .step-num{width:auto;height:auto;border-radius:0;background:none;color:var(--blue);font-size:0.8125rem;font-weight:500;display:block;margin:0 0 1rem;font-family:var(--mono);letter-spacing:0.08em;box-shadow:none}
     .step h3{font-size:16px;margin-bottom:8px;font-weight:600}
     .step p{color:var(--text2);font-size:14px;line-height:1.65}
 
@@ -305,7 +310,7 @@
     /* Pricing comparison table */
     #pricing{padding-top:40px}
     .pricing-table-wrap{max-width:960px;margin:0 auto;overflow-x:auto;-webkit-overflow-scrolling:touch;background:linear-gradient(180deg,var(--card) 0%,var(--bg2) 100%);border:1px solid var(--border);border-radius:16px;padding:4px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
-    .pricing-table-wrap::before{content:'';position:absolute;inset:-1px;border-radius:17px;padding:1px;background:linear-gradient(180deg,rgba(99,102,241,0.15),transparent 50%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+    .pricing-table-wrap::before{content:'';position:absolute;inset:0;border-radius:16px;padding:1px;background:linear-gradient(180deg,rgba(99,102,241,0.15),transparent 50%);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
     .pricing-table{width:100%;border-collapse:collapse;min-width:540px}
     .pricing-table thead th{padding:20px 12px 16px;text-align:center;vertical-align:bottom;border-bottom:1px solid var(--border)}
     .pricing-table thead th:first-child{text-align:left;width:40%}
@@ -326,14 +331,14 @@
     .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
     /* FAQ */
-    .faq-list{max-width:720px;margin:0 auto}
-    .faq-item{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;transition:border-color 0.2s}
-    .faq-item:hover{border-color:var(--border2)}
-    .faq-q{width:100%;text-align:left;background:none;border:none;font-family:inherit;font-size:15px;font-weight:600;padding:18px 20px;color:var(--text);letter-spacing:-0.01em;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;user-select:none;min-height:44px}
+    .faq-list{max-width:46rem;margin:0}
+    .faq-item{background:none;border:none;border-top:1px solid var(--border);border-radius:0;margin-bottom:0;overflow:hidden;transition:none}
+    .faq-item:last-child{border-bottom:1px solid var(--border)}
+    .faq-q{width:100%;text-align:left;background:none;border:none;font-family:'Bricolage Grotesque','IBM Plex Sans',sans-serif;font-size:clamp(1.0625rem,1.6vw,1.1875rem);font-weight:600;padding:1.5rem 2.5rem 1.5rem 0;color:var(--text);letter-spacing:-0.01em;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;user-select:none;min-height:44px}
     .faq-q:focus-visible{outline:2px solid var(--blue);outline-offset:-2px;border-radius:8px}
     .faq-q::after{content:'+';font-size:18px;color:var(--text3);transition:transform 0.2s;flex-shrink:0;font-weight:400}
     .faq-item.open .faq-q::after{content:'\2212';transform:rotate(180deg)}
-    .faq-a{font-size:14px;color:var(--text2);line-height:1.7;padding:0 20px 18px;display:none}
+    .faq-a{font-size:15px;color:var(--text2);line-height:1.7;padding:0 2.5rem 1.5rem 0;display:none;max-width:38rem}
     .faq-item.open .faq-a{display:block}
 
     /* CTA banner */
@@ -342,12 +347,7 @@
     .cta-banner::after{content:'';position:absolute;top:50%;left:50%;width:600px;height:300px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(ellipse,rgba(99,102,241,0.08),transparent 70%);pointer-events:none}
     .cta-banner .inner{position:relative;max-width:600px;margin:0 auto}
     .cta-banner h2{font-size:28px;font-weight:700;margin-bottom:12px;letter-spacing:-0.02em}
-    .cta-banner p{color:var(--text2);font-size:15px;margin-bottom:24px}
-
-    /* Flow arrows between sections */
-    .flow-arrow{display:flex;justify-content:center;padding:8px 0;color:var(--border2)}
-    .flow-arrow svg{opacity:0.4;animation:flow-pulse 2s ease-in-out infinite}
-    @keyframes flow-pulse{0%,100%{opacity:0.25;transform:translateY(0)}50%{opacity:0.5;transform:translateY(3px)}}
+    .cta-banner p{color:var(--text2);font-size:15px;margin-bottom:24px}50%{opacity:0.5;transform:translateY(3px)}}
 
     /* Footer */
     footer{border-top:1px solid var(--border);padding:40px 20px;margin-top:0}
@@ -367,19 +367,15 @@
       .nav-links .btn-outline{display:inline-flex}
       .nav-links .btn{padding:12px 24px;font-size:15px}
       .hero{padding:130px 24px 80px}
-      .hero p{font-size:17px;margin-bottom:36px;max-width:52ch}
-      .hero-sub{font-size:13px;max-width:none}
+      .hero-sub{font-size:12px}
       .hero-cta{flex-direction:row;align-items:center;justify-content:center}
       .hero-cta .btn{width:auto}
-      .section{padding:80px 24px}
-      .section-title{margin-bottom:48px}
-      .section-title h2{font-size:30px}
+      .section{padding-left:24px;padding-right:24px}
+            
       .features-grid{grid-template-columns:repeat(2,1fr);gap:16px}
       .feature-card{padding:28px}
       .steps{grid-template-columns:repeat(3,1fr);margin-top:48px;gap:16px}
-      /* Connector lines between steps */
-      .step:not(:last-child)::before{content:'';position:absolute;top:40px;right:-10px;width:20px;height:2px;background:linear-gradient(90deg,var(--blue-deep),transparent);z-index:1}
-      .pricing-table{min-width:auto}
+      .pricing-table{min-width:0;table-layout:fixed}      .pricing-table-wrap{overflow:hidden}
       .pricing-table thead .plan-price{font-size:32px}
       .integrations-row{grid-template-columns:repeat(4,1fr);gap:16px}
       .cta-banner{padding:80px 24px}
@@ -393,7 +389,7 @@
       .nav-links{gap:24px}
       .nav-links a{font-size:14px;padding:8px 4px}
       .hero{padding:150px 24px 90px}
-      .section-title h2{font-size:34px}
+      
       .features-grid{grid-template-columns:repeat(2,1fr)}
       .pricing-table thead .plan-price{font-size:36px}
       footer{padding:40px 24px}
@@ -412,11 +408,11 @@
       html{scroll-behavior:auto}
       .feature-card,.btn,.btn-primary,.btn-glow,.intg-card{transition:none}
       .hero-bg .orb{display:none}
-      .flow-arrow svg{animation:none;opacity:0.3}
     }
   </style>
 </head>
 <body>
+  <a href="#main" class="skip-link">Skip to content</a>
   <!-- Navigation -->
   <nav aria-label="Main navigation">
     <div class="nav-inner">
@@ -435,7 +431,7 @@
     </div>
   </nav>
 
-  <main>
+  <main id="main">
     <!-- Hero -->
     <div class="hero-wrap">
       <div class="hero-bg" aria-hidden="true">
@@ -445,7 +441,7 @@
         <div class="hero-grid"></div>
       </div>
       <section class="hero">
-        <div class="hero-badge" aria-hidden="true">We watch your web so you don't have to</div>
+        <div class="hero-badge">We watch your web so you don't have to</div>
         <h1>Monitor Your <span class="gradient">Website Health</span> <span class="nb">in One Dashboard</span></h1>
         <p>Track SEO issues, Core Web Vitals, accessibility, AI readiness, and broken links across all your sites. Daily automated audits with AI-powered fix suggestions.</p>
         <div class="hero-cta">
@@ -455,8 +451,37 @@
         <p class="hero-sub">7-day free trial &middot; No credit card required &middot; 1 website included</p>
       </section>
     </div>
+    <div class="section-divider" aria-hidden="true"></div>
 
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
+
+
+    <!-- The Problem -->
+    <div class="section-glow-wrap glow-blue">
+    <section class="section" id="why">
+      <div class="section-title">
+        <span class="tag">The Problem</span>
+        <h2>Site health is invisible until something breaks</h2>
+        <p>Nobody notices a slow decay — a deploy that strips meta titles, a plugin that blocks AI crawlers, a form that quietly stops working for screen readers. You find out when traffic is already gone.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">01</div>
+          <h3>Tool sprawl</h3>
+          <p>Analytics in one tab, Search Console in another, a Lighthouse run when you remember, a link checker you ran once. Five tools, no single answer to "is my site okay?"</p>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <h3>Silent regressions</h3>
+          <p>Sites break quietly. A template change wipes your descriptions, a redirect loop eats a landing page — and nothing tells you until rankings slip weeks later.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <h3>The AI blind spot</h3>
+          <p>ChatGPT, Perplexity, and Google AI Overviews are answering your customers' questions right now. Almost nobody is checking whether those engines can even read their site.</p>
+        </div>
+      </div>
+    </section>
+    </div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- Features -->
@@ -541,8 +566,6 @@
       </div>
     </section>
     </div>
-
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- Issue Tracking -->
@@ -572,8 +595,6 @@
       </div>
     </section>
     </div>
-
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- Integrations -->
@@ -608,8 +629,6 @@
       </div>
     </section>
     </div>
-
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- How it works -->
@@ -639,8 +658,6 @@
       </div>
     </section>
     </div>
-
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- Pricing -->
@@ -676,25 +693,25 @@
           <tbody>
             <tr class="cat-row"><td colspan="4">Core Features</td></tr>
             <tr><td>Websites</td><td>1</td><td>Up to 5</td><td>Up to 25</td></tr>
-            <tr><td>Daily automated audits</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>SEO auditing</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Core Web Vitals</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Accessibility checks</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Broken link detection</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Performance trend charts</td><td class="check">&#10003;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Daily automated audits</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>SEO auditing</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Core Web Vitals</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Accessibility checks</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Broken link detection</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Performance trend charts</td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
             <tr class="cat-row"><td colspan="4">AI &amp; Insights</td></tr>
-            <tr><td>AI readiness scoring</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>AI-powered fix suggestions</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Keyword tracking &amp; opportunities</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>AI readiness scoring</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>AI-powered fix suggestions</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Keyword tracking &amp; opportunities</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
             <tr class="cat-row"><td colspan="4">Integrations</td></tr>
-            <tr><td>Google Analytics 4</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Google Search Console</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Cloudflare analytics</td><td class="dash">&mdash;</td><td class="check">&#10003;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Google Analytics 4</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Google Search Console</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Cloudflare analytics</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
             <tr class="cat-row"><td colspan="4">Collaboration &amp; Export</td></tr>
-            <tr><td>Team invites</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Role-based access control</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
-            <tr><td>CSV export</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
-            <tr><td>Priority support</td><td class="dash">&mdash;</td><td class="dash">&mdash;</td><td class="check">&#10003;</td></tr>
+            <tr><td>Team invites</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Role-based access control</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>CSV export</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
+            <tr><td>Priority support</td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="dash"><span aria-hidden="true">&mdash;</span><span class="sr-only">Not included</span></td><td class="check"><span aria-hidden="true">&#10003;</span><span class="sr-only">Included</span></td></tr>
           </tbody>
           <tfoot>
             <tr>
@@ -708,8 +725,6 @@
       </div>
     </section>
     </div>
-
-    <div class="flow-arrow" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg></div>
     <div class="section-divider" aria-hidden="true"></div>
 
     <!-- FAQ -->
@@ -753,6 +768,22 @@
         </div>
       </div>
     </section>
+
+
+    <!-- About -->
+    <section class="section" id="about">
+      <div class="section-title">
+        <span class="tag">About</span>
+        <h2>Built by someone who needed it</h2>
+      </div>
+      <div style="max-width:38rem">
+        <p style="color:var(--text2);font-size:1.0625rem;line-height:1.7;margin-bottom:1.25rem">I'm Robbie. I look after a portfolio of winery websites, and my Mondays used to disappear into tab-cycling: Analytics for one site, Search Console for another, a hand-run Lighthouse audit for a third. The week a template change silently wiped meta descriptions across an entire site — and nobody noticed for a month — I decided the checking should be automatic.</p>
+        <p style="color:var(--text2);font-size:1.0625rem;line-height:1.7;margin-bottom:1.25rem">Shelob Web is the watcher I wanted: one nightly crawl across every site I care about, one dashboard that tells me what changed, what broke, and what got fixed. When AI search arrived and started answering my customers' questions, I added AI readiness and AEO scoring — because the next decade of traffic won't just come from ten blue links.</p>
+        <p style="color:var(--text2);font-size:1.0625rem;line-height:1.7">The name? Shelob is the great spider. She sits at the center of her web and notices everything that moves. That's the job.</p>
+        <p style="color:var(--text3);font-size:0.8125rem;font-family:var(--mono);letter-spacing:0.08em;text-transform:uppercase;margin-top:2rem">&mdash; Robbie, founder</p>
+      </div>
+    </section>
+    <div class="section-divider" aria-hidden="true"></div>
 
     <!-- CTA Banner -->
     <section class="cta-banner">
