@@ -380,7 +380,7 @@
         <div class="page-header">
           <div class="page-title"><h2 id="prop-name">Property</h2><p id="prop-domains">-</p></div>
           <div id="property-stats-header" style="display:flex;gap:10px;align-items:center"></div>
-          <div class="header-actions"><button class="btn" style="background:var(--card);color:var(--text)" onclick="showView('portfolio')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back</button></div>
+          <div class="header-actions"><button class="btn" onclick="window.open('/report?property='+currentPropertyId,'_blank')" style="background:rgba(99,102,241,0.12);color:var(--blue);border:1px solid rgba(99,102,241,0.3)" title="Print-ready health report to share with stakeholders">&#128200; Exec Report</button><button class="btn" style="background:var(--card);color:var(--text)" onclick="showView('portfolio')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back</button></div>
         </div>
         <div class="tabs">
           <button class="tab active" data-tab="seo">SEO</button>
@@ -389,28 +389,28 @@
           <button class="tab" data-tab="ai-readiness">AI Readiness</button>
         </div>
         <div class="tab-content" id="tab-performance">
-          <div class="section" id="perf-traffic-section"><div class="section-header"><h3>Traffic Overview</h3><span style="font-size:12px;color:var(--text3)">From Cloudflare</span></div><div class="metrics-grid" id="perf-traffic"></div></div>
-          <div class="section" id="perf-ga4-section"><div class="section-header"><h3>User Analytics</h3><span style="font-size:12px;color:var(--text3)">From Google Analytics 4</span></div><div class="metrics-grid" id="perf-ga4"></div></div>
-          <div class="section" id="perf-pages-section" style="display:none"><div class="section-header"><h3>Top Pages</h3><span style="font-size:12px;color:var(--text3)">Most viewed pages</span></div><div id="perf-pages"></div></div>
-          <div class="section" id="perf-codes-section"><div class="section-header"><h3>Response Codes</h3><span style="font-size:12px;color:var(--text3)">HTTP status distribution</span></div><div class="metrics-grid" id="perf-codes"></div></div>
-          <div class="section"><div class="section-header"><h3>Core Web Vitals</h3><span id="cwv-source-label" style="font-size:12px;color:var(--text3)">Powered by Google Lighthouse</span></div><div class="metrics-grid" id="perf-cwv"></div></div>
+          <div class="section" id="perf-traffic-section"><div class="section-header"><h3>Traffic Overview</h3><span style="font-size:12px;color:var(--text3)">Is the site up, fast, and safe for visitors — from Cloudflare</span></div><div class="metrics-grid" id="perf-traffic"></div></div>
+          <div class="section" id="perf-ga4-section"><div class="section-header"><h3>User Analytics</h3><span style="font-size:12px;color:var(--text3)">Are visits turning into engaged customers — from Google Analytics 4</span></div><div class="metrics-grid" id="perf-ga4"></div></div>
+          <div class="section" id="perf-pages-section" style="display:none"><div class="section-header"><h3>Top Pages</h3><span style="font-size:12px;color:var(--text3)">Where visitors actually spend their time</span></div><div id="perf-pages"></div></div>
+          <div class="section" id="perf-codes-section"><div class="section-header"><h3>Response Codes</h3><span style="font-size:12px;color:var(--text3)">Errors your visitors are actually hitting</span></div><div class="metrics-grid" id="perf-codes"></div></div>
+          <div class="section"><div class="section-header"><h3>Core Web Vitals</h3><span id="cwv-source-label" style="font-size:12px;color:var(--text3)">Speed as Google measures it — slow pages rank lower and convert less</span></div><div class="metrics-grid" id="perf-cwv"></div></div>
           <div class="section"><div class="section-header"><h3>Recommendations</h3></div><div id="perf-recommendations"></div></div>
         </div>
         <div class="tab-content active" id="tab-seo">
           <div id="seo-reactivated-banner" style="display:none"></div>
           <div class="section"><div class="section-header"><h3>SEO Issues</h3><span id="seo-audit-info" style="font-size:12px;color:var(--text3)"></span><button id="btn-generate-ai" onclick="generateAISuggestions()" style="margin-left:auto;padding:4px 12px;background:rgba(99,102,241,0.1);color:var(--blue);border:1px solid rgba(99,102,241,0.2);border-radius:6px;font-size:11px;cursor:pointer;display:none;align-items:center;gap:4px" title="Generate AI fix suggestions for open issues"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> Generate AI Fixes</button></div><div id="seo-issues"></div></div>
           <div class="section"><div class="section-header"><h3>Broken Links &amp; 404s</h3></div><div id="seo-broken"></div><div id="seo-404s" style="margin-top:16px"></div></div>
-          <div class="section"><div class="section-header"><h3>Keyword Opportunities</h3><span style="font-size:12px;color:var(--text3)">Non-branded keywords with growth potential</span></div><div id="seo-opportunities"></div></div>
-          <div class="section"><div class="section-header"><h3>Top Keywords</h3><span style="font-size:12px;color:var(--text3)">From Google Search Console (28 days)</span></div><div id="seo-keywords"></div></div>
+          <div class="section"><div class="section-header"><h3>Keyword Opportunities</h3><span style="font-size:12px;color:var(--text3)">Queries where a small content push wins page-one traffic</span></div><div id="seo-opportunities"></div></div>
+          <div class="section"><div class="section-header"><h3>Top Keywords</h3><span style="font-size:12px;color:var(--text3)">What people type into Google before finding you (28 days)</span></div><div id="seo-keywords"></div></div>
         </div>
         <div class="tab-content" id="tab-accessibility">
           <div id="a11y-reactivated-banner" style="display:none"></div>
-          <div class="section" id="lighthouse-a11y-section"><div class="section-header"><h3>Google Lighthouse Audit</h3><span style="font-size:12px;color:var(--text3)">Powered by axe-core via PageSpeed Insights API</span></div><div id="lighthouse-a11y"></div></div>
+          <div class="section" id="lighthouse-a11y-section"><div class="section-header"><h3>Google Lighthouse Audit</h3><span style="font-size:12px;color:var(--text3)">Who gets locked out of your site — and the legal risk that carries</span></div><div id="lighthouse-a11y"></div></div>
           <div class="section"><div class="section-header"><h3>Site Crawl Issues</h3><span style="font-size:12px;color:var(--text3)">From full site crawl (all pages)</span></div><div id="a11y-issues"></div></div>
           <div class="section"><div class="section-header"><h3>How to Fix</h3></div><div id="a11y-recommendations"></div></div>
         </div>
         <div class="tab-content" id="tab-ai-readiness">
-          <div class="section"><div class="section-header"><h3>AI Readiness Score</h3><span style="font-size:12px;color:var(--text3)">How well your site works with AI search &amp; chatbots</span></div><div class="metrics-grid" id="air-score"></div></div>
+          <div class="section"><div class="section-header"><h3>AI Readiness Score</h3><span style="font-size:12px;color:var(--text3)">Can ChatGPT, Perplexity &amp; Google AI read and recommend you</span></div><div class="metrics-grid" id="air-score"></div></div>
           <div class="section" id="air-aeo-section"><div class="section-header"><h3>Answer Engine Optimization (AEO)</h3><span id="air-aeo-summary" style="font-size:12px;color:var(--text3)">Getting cited by ChatGPT, Perplexity, Google AI Overviews &amp; Claude</span></div><div id="air-aeo"></div></div>
           <div class="section" id="air-visibility-section"><div class="section-header"><h3>AI Visibility by Engine</h3><span style="font-size:12px;color:var(--text3)">How ready your site is to be read &amp; cited by each AI engine</span></div><div id="air-visibility"></div></div>
           <div class="section"><div class="section-header"><h3>LLM Access Files</h3><span style="font-size:12px;color:var(--text3)">llms.txt tells AI systems what content is available</span></div><div id="air-llm-access"></div></div>

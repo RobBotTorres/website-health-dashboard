@@ -20,6 +20,7 @@ import {
   getUserRecord
 } from './auth.js';
 import { getDateRange } from './utils.js';
+import { handleExecutiveReport } from './report.js';
 import { runLifecycleEmails, verifyUnsubscribeToken } from './emails.js';
 import { cloudflareGraphQL } from './cloudflare-api.js';
 import { runScheduledAudit, runFullSitemapAudit, generateAISuggestions, buildFixPrompt } from './audit.js';
@@ -395,6 +396,12 @@ Shelob Web is built on Cloudflare Workers. Contact: via the website. It helps si
     // ================================================================
     // AUTHENTICATED: Dashboard page
     // ================================================================
+
+    if (url.pathname === '/report') {
+      const rUser = await authenticateRequest(request, env);
+      if (!rUser) return Response.redirect(url.origin + '/login', 302);
+      return handleExecutiveReport(url, env, rUser);
+    }
 
     if (url.pathname === '/dashboard' || url.pathname === '/dashboard/') {
       const user = await authenticateRequest(request, env);
