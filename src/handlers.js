@@ -924,7 +924,7 @@ export async function handle404Errors(propertyId, env, user) {
     if (env.DB && user?.userId) {
       const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
       if (property) {
-        const creds = getPropertyCredentials(property, env);
+        const creds = await getPropertyCredentials(property, env);
         zoneId = creds.cloudflare.zoneIds?.[0];
         apiToken = creds.cloudflare.apiToken;
       }
@@ -1192,7 +1192,7 @@ async function resolveCredentials(propertyId, env, user) {
   if (env.DB && user?.userId) {
     const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
     if (property) {
-      return getPropertyCredentials(property, env);
+      return await getPropertyCredentials(property, env);
     }
   }
 
@@ -1530,7 +1530,7 @@ export async function fetchCloudflareData(propertyId, env, user) {
   if (env.DB && user?.userId) {
     const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
     if (property) {
-      const creds = getPropertyCredentials(property, env);
+      const creds = await getPropertyCredentials(property, env);
       return await fetchCloudflareDetail(creds.cloudflare, env);
     }
   }
@@ -1548,7 +1548,7 @@ export async function fetchSearchConsoleData(propertyId, env, user) {
   if (env.DB && user?.userId) {
     const property = await validatePropertyAccess(user.userId, propertyId, env.DB);
     if (property) {
-      const creds = getPropertyCredentials(property, env);
+      const creds = await getPropertyCredentials(property, env);
       return await fetchSearchConsoleDetail(creds.searchConsole);
     }
   }

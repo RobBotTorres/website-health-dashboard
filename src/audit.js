@@ -439,7 +439,7 @@ export async function runFullSitemapAudit(domain, env, userId = null) {
         ).bind(domain, userId).first();
         if (dbProp) {
           const { getPropertyCredentials } = await import('./tenant.js');
-          const creds = getPropertyCredentials(dbProp, env);
+          const creds = await getPropertyCredentials(dbProp, env);
           if (creds.searchConsole.properties.length > 0) {
             console.log(`Fetching OAuth Search Console data for ${domain}...`);
             await fetchAndStoreSearchConsole(env, domain, dbProp.id, today, creds);
@@ -1874,7 +1874,7 @@ export async function fetchAndStorePerformance(env, domain, propertyId, dataDate
           'SELECT * FROM properties WHERE id = ? AND user_id = ?'
         ).bind(propertyId, userId).first();
         if (property) {
-          creds = getPropertyCredentials(property, env);
+          creds = await getPropertyCredentials(property, env);
         }
       } catch (e) {
         // Fall through to legacy

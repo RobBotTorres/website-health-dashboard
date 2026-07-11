@@ -496,3 +496,61 @@ export async function fetchCloudflarePerformance(creds, env) {
     pageViewsChange: pageViewsChange.toFixed(1)
   };
 }
+
+// AI crawler user-agents worth tracking, mapped to the engines they feed.
+const AI_CRAWLERS = [
+  { alias: 'gptbot', like: '%GPTBot%', bot: 'GPTBot', engine: 'ChatGPT (model training)', vendor: 'OpenAI' },
+  { alias: 'oaisearch', like: '%OAI-SearchBot%', bot: 'OAI-SearchBot', engine: 'ChatGPT Search', vendor: 'OpenAI' },
+  { alias: 'chatgptuser', like: '%ChatGPT-User%', bot: 'ChatGPT-User', engine: 'ChatGPT (live browsing)', vendor: 'OpenAI' },
+  { alias: 'claudebot', like: '%ClaudeBot%', bot: 'ClaudeBot', engine: 'Claude', vendor: 'Anthropic' },
+  { alias: 'perplexbot', like: '%PerplexityBot%', bot: 'PerplexityBot', engine: 'Perplexity (indexing)', vendor: 'Perplexity' },
+  { alias: 'perplexuser', like: '%Perplexity-User%', bot: 'Perplexity-User', engine: 'Perplexity (live browsing)', vendor: 'Perplexity' },
+  { alias: 'ccbot', like: '%CCBot%', bot: 'CCBot', engine: 'Common Crawl (feeds many models)', vendor: 'Common Crawl' },
+  { alias: 'bytespider', like: '%Bytespider%', bot: 'Bytespider', engine: 'ByteDance / Doubao', vendor: 'ByteDance' },
+  { alias: 'metaext', like: '%meta-externalagent%', bot: 'Meta-ExternalAgent', engine: 'Meta AI', vendor: 'Meta' },
+  { alias: 'amazonbot', like: '%Amazonbot%', bot: 'Amazonbot', engine: 'Amazon / Alexa AI', vendor: 'Amazon' }
+];
+
+/**
+ * How often AI crawlers actually hit the site — request counts per bot over
+ * the last 7 days, from Cloudflare's adaptive request logs (user-agent match).
+ */
+export async function fetchAICrawlerActivity(creds) {
+  if (!creds.apiToken || !creds.zoneIds?.length) return { available: false };
+  const headers = { 'Authorization': `Bearer ${creds.apiToken}`, 'Content-Type': 'application/json' };
+  const now = new Date();
+  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const iso = d => d.toISOString().split('.')[0] + 'Z';
+
+  const subQueries = AI_CRAWLERS.map(c =>
+    `${c.alias}: httpRequestsAdaptiveGroups(limit: 1, filter: {datetime_geq: "${iso(start)}", datetime_lt: "${iso(now)}", userAgent_like: "${c.like}"}) { count }`
+  ).join('\n');
+
+  try {
+    const result = await cloudflareGraphQL(headers, `
+      query {
+        viewer {
+          zones(filter: {zoneTag: "${creds.zoneIds[0]}"}) {
+            ${subQueries}
+          }
+        }
+      }`);
+    if (result.errors?.length) {
+      return { available: false, error: result.errors[0].message };
+    }
+    const zone = result.data?.viewer?.zones?.[0];
+    if (!zone) return { available: false, error: 'zone not found' };
+    const crawlers = AI_CRAWLERS.map(c => ({
+      bot: c.bot, engine: c.engine, vendor: c.vendor,
+      requests: zone[c.alias]?.[0]?.count || 0
+    }));
+    return {
+      available: true,
+      days: 7,
+      total: crawlers.reduce((a, b) => a + b.requests, 0),
+      crawlers: crawlers.sort((a, b) => b.requests - a.requests)
+    };
+  } catch (e) {
+    return { available: false, error: e.message };
+  }
+}

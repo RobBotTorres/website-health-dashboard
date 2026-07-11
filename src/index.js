@@ -708,12 +708,25 @@ async function routeAuthenticated(url, request, env, user) {
       return handleKeywords(url.searchParams.get('domain'), env, user);
     }
 
+    if (url.pathname === '/api/ai-crawlers') {
+      const pid2 = url.searchParams.get('property');
+      if (!pid2 || !env.DB) return jsonResponse({ available: false });
+      const prop2 = await validatePropertyAccess(user.userId, pid2, env.DB);
+      if (!prop2) return jsonResponse({ available: false });
+      const creds2 = await getPropertyCredentials(prop2, env);
+      if (!creds2.cloudflare.apiToken || !creds2.cloudflare.zoneIds?.length || !prop2.cf_api_token_encrypted) {
+        return jsonResponse({ available: false, reason: 'cloudflare_not_connected' });
+      }
+      const { fetchAICrawlerActivity } = await import('./cloudflare-api.js');
+      return jsonResponse(await fetchAICrawlerActivity(creds2.cloudflare));
+    }
+
     if (url.pathname === '/api/ga4-404s') {
       const pid = url.searchParams.get('property');
       if (!pid || !env.DB) return jsonResponse({ pages: [] });
       const prop = await validatePropertyAccess(user.userId, pid, env.DB);
       if (!prop) return jsonResponse({ pages: [] });
-      const creds = getPropertyCredentials(prop, env);
+      const creds = await getPropertyCredentials(prop, env);
       const { fetchGA4NotFound } = await import('./google-api.js');
       return jsonResponse(await fetchGA4NotFound(creds.ga4));
     }
@@ -1146,11 +1159,31 @@ async function handleUpdateCFIntegration(propertyId, request, env, user) {
     encryptedToken = await encryptToken(apiToken, env.ENCRYPTION_KEY);
   }
 
+  // Auto-resolve the zone ID from the domain so users never hunt for it
+  let resolvedZones = zoneIds || property.cf_zone_ids;
+  let zoneNote = '';
+  if (apiToken && !resolvedZones) {
+    try {
+      const zr = await fetch(`https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(property.domain)}&status=active`, {
+        headers: { 'Authorization': `Bearer ${apiToken}` }
+      });
+      const zd = await zr.json();
+      if (zd.success && zd.result?.length) {
+        resolvedZones = zd.result[0].id;
+        zoneNote = ` Zone auto-detected for ${property.domain}.`;
+      } else {
+        zoneNote = ' Token saved, but no active zone found for this domain on that Cloudflare account — check the token scope or add the zone ID manually.';
+      }
+    } catch (e) {
+      zoneNote = ' Token saved; zone auto-detection failed — add the zone ID manually.';
+    }
+  }
+
   await env.DB.prepare(
     'UPDATE properties SET cf_api_token_encrypted = ?, cf_zone_ids = ? WHERE id = ? AND user_id = ?'
-  ).bind(encryptedToken, zoneIds || property.cf_zone_ids, propertyId, user.userId).run();
+  ).bind(encryptedToken, resolvedZones || null, propertyId, user.userId).run();
 
-  return jsonResponse({ message: 'Cloudflare integration updated' });
+  return jsonResponse({ message: 'Cloudflare integration updated.' + zoneNote });
 }
 
 /**
@@ -1586,7 +1619,7 @@ async function prefetchIntegrationData(propertyId, userId, env) {
   const property = await env.DB.prepare('SELECT * FROM properties WHERE id = ?').bind(propertyId).first();
   if (!property) return;
 
-  const creds = getPropertyCredentials(property, env);
+  const creds = await getPropertyCredentials(property, env);
 
   // Fetch GA4 data and store in performance_snapshots for immediate dashboard display
   if (creds.ga4.propertyId && creds.ga4.credentials) {

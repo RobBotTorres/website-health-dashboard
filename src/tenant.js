@@ -115,7 +115,18 @@ export async function validatePropertyAccess(userId, propertyId, db) {
  * @param {object} env - Worker environment bindings
  * @returns {object} credentials object matching the existing creds shape
  */
-export function getPropertyCredentials(property, env) {
+export async function getPropertyCredentials(property, env) {
+  // Decrypt the user's CF token — it is stored AES-encrypted. Previously the
+  // encrypted blob was passed straight to Cloudflare, which can never work.
+  let cfToken = env.CLOUDFLARE_API_TOKEN || null;
+  if (property.cf_api_token_encrypted && env.ENCRYPTION_KEY) {
+    try {
+      const { decryptToken } = await import('./google-oauth.js');
+      cfToken = await decryptToken(property.cf_api_token_encrypted, env.ENCRYPTION_KEY);
+    } catch (e) {
+      console.error('CF token decrypt failed:', e.message);
+    }
+  }
   const cfZoneIds = property.cf_zone_ids
     ? property.cf_zone_ids.split(',').map(s => s.trim()).filter(Boolean)
     : [];
@@ -127,7 +138,7 @@ export function getPropertyCredentials(property, env) {
   return {
     cloudflare: {
       // User's own CF token if provided, otherwise fall back to system token
-      apiToken: property.cf_api_token_encrypted || env.CLOUDFLARE_API_TOKEN,
+      apiToken: cfToken,
       zoneIds: cfZoneIds
     },
     searchConsole: {
