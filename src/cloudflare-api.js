@@ -518,35 +518,50 @@ const AI_CRAWLERS = [
 export async function fetchAICrawlerActivity(creds) {
   if (!creds.apiToken || !creds.zoneIds?.length) return { available: false };
   const headers = { 'Authorization': `Bearer ${creds.apiToken}`, 'Content-Type': 'application/json' };
-  const now = new Date();
-  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const iso = d => d.toISOString().split('.')[0] + 'Z';
+  const DAYS = 7;
 
   const subQueries = AI_CRAWLERS.map(c =>
-    `${c.alias}: httpRequestsAdaptiveGroups(limit: 1, filter: {datetime_geq: "${iso(start)}", datetime_lt: "${iso(now)}", userAgent_like: "${c.like}"}) { count }`
+    `${c.alias}: httpRequestsAdaptiveGroups(limit: 1, filter: {datetime_geq: $start, datetime_lt: $end, userAgent_like: "${c.like}"}) { count }`
   ).join('\n');
 
-  try {
-    const result = await cloudflareGraphQL(headers, `
-      query {
-        viewer {
-          zones(filter: {zoneTag: "${creds.zoneIds[0]}"}) {
-            ${subQueries}
-          }
+  // Free-plan zones cap adaptive queries at a 1-day window — query per day and sum.
+  const dayQuery = (start, end) => `
+    query {
+      viewer {
+        zones(filter: {zoneTag: "${creds.zoneIds[0]}"}) {
+          ${subQueries.replaceAll('$start', `"${iso(start)}"`).replaceAll('$end', `"${iso(end)}"`)}
         }
-      }`);
-    if (result.errors?.length) {
-      return { available: false, error: result.errors[0].message };
+      }
+    }`;
+
+  try {
+    const now = new Date();
+    const windows = [];
+    for (let i = DAYS; i > 0; i--) {
+      windows.push([new Date(now.getTime() - i * 86400000), new Date(now.getTime() - (i - 1) * 86400000)]);
     }
-    const zone = result.data?.viewer?.zones?.[0];
-    if (!zone) return { available: false, error: 'zone not found' };
+    const results = await Promise.all(windows.map(([a, b]) => cloudflareGraphQL(headers, dayQuery(a, b))));
+
+    const totals = {};
+    let firstError = null;
+    for (const r of results) {
+      if (r.errors?.length) { firstError = r.errors[0].message; continue; }
+      const zone = r.data?.viewer?.zones?.[0];
+      if (!zone) continue;
+      for (const c of AI_CRAWLERS) {
+        totals[c.alias] = (totals[c.alias] || 0) + (zone[c.alias]?.[0]?.count || 0);
+      }
+    }
+    if (Object.keys(totals).length === 0) {
+      return { available: false, error: firstError || 'no data returned' };
+    }
     const crawlers = AI_CRAWLERS.map(c => ({
-      bot: c.bot, engine: c.engine, vendor: c.vendor,
-      requests: zone[c.alias]?.[0]?.count || 0
+      bot: c.bot, engine: c.engine, vendor: c.vendor, requests: totals[c.alias] || 0
     }));
     return {
       available: true,
-      days: 7,
+      days: DAYS,
       total: crawlers.reduce((a, b) => a + b.requests, 0),
       crawlers: crawlers.sort((a, b) => b.requests - a.requests)
     };
