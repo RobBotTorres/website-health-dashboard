@@ -615,7 +615,7 @@ async function routeAuthenticated(url, request, env, user) {
       return handleDeleteProperty(propertyId, env, user);
     }
 
-    if (url.pathname.startsWith('/api/properties/') && request.method === 'PUT') {
+    if (url.pathname.startsWith('/api/properties/') && !url.pathname.includes('/integrations/') && request.method === 'PUT') {
       const propertyId = extractPathParam(url.pathname, '/api/properties/');
       if (!propertyId) return errorResponse('Missing property ID');
       return handleUpdatePropertyRoute(propertyId, request, env, user);
@@ -1117,7 +1117,9 @@ async function handleUpdatePropertyRoute(propertyId, request, env, user) {
   const updated = await updateProperty(user.userId, propertyId, body, env.DB);
 
   if (!updated) return errorResponse('Property not found or access denied', 404);
-  return jsonResponse({ property: updated });
+  // Never leak stored credentials — even encrypted — in API responses
+  const { google_refresh_token_encrypted, cf_api_token_encrypted, ...safe } = updated;
+  return jsonResponse({ property: safe });
 }
 
 async function handleTriggerPropertyAudit(propertyId, env, user) {
